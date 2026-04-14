@@ -128,7 +128,14 @@ Make sure OSC is enabled in VRChat:
 
 ## License
 
-MIT License – feel free to fork and modify for personal use.
+© 2026 me0wg4ming. All rights reserved.
+
+This project is **source-available** – you may view and study the code, but you may **not**:
+- Copy, redistribute, or republish this software or any part of it
+- Use this code or any derivative in your own projects without explicit written permission
+- Sell or commercially exploit this software
+
+The source code is provided for transparency and community trust only.
 
 ---
 
