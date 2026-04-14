@@ -22,6 +22,8 @@ Head to the [Releases](../../releases) page and download the latest `VRChatOSCRe
 
 > ✅ **1/72 on VirusTotal** – The installer is flagged by only 1 antivirus (Trapmine, low confidence false positive). This is a known issue with Python-based installers.
 
+https://www.virustotal.com/gui/file/92fa1bab26175e5b31092c089ee6caebb91df7c682243c82d6cd84c1719df634?nocache=1
+
 ---
 
 ## Installation
