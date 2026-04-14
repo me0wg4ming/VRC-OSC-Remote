@@ -20,7 +20,7 @@ A remote control tool for VRChat avatars using OSC protocol. Allows a **Dom** to
 
 Head to the [Releases](../../releases) page and download the latest `VRChatOSCRemote-Setup.exe`.
 
-> ✅ **1/72 on VirusTotal** – The installer is flagged by only 1 antivirus (Trapmine, low confidence false positive). This is a known issue with Python-based installers.
+> ✅ **0/72 on VirusTotal** – The installer is flagged by no antivirus.
 
 https://www.virustotal.com/gui/file/92fa1bab26175e5b31092c089ee6caebb91df7c682243c82d6cd84c1719df634?nocache=1
 
