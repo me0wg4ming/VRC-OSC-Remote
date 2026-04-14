@@ -54,9 +54,9 @@ def _first_run_setup():
     role_frame.pack(fill="x", padx=40, pady=4)
     tk.Label(role_frame, text="Role:", fg="#cba6f7", bg="#1e1e2e",
              font=("Segoe UI", 9, "bold"), width=8, anchor="w").pack(side="left")
-    role_var = tk.StringVar(value="slave")
+    role_var = tk.StringVar(value="sub")
     ttk.Combobox(role_frame, textvariable=role_var,
-                 values=["slave", "master"],
+                 values=["sub", "dom"],
                  state="readonly", width=20).pack(side="left")
 
     # Key
@@ -81,13 +81,13 @@ def _first_run_setup():
         # Write config.ini
         cfg = configparser.ConfigParser()
         cfg["general"] = {
-            "; Slave: single key only\nkey"    : key,
-            "; Master: multiple keys comma-separated\nkeys": key,
+            "; Sub: single key only\nkey"    : key,
+            "; Dom: multiple keys comma-separated\nkeys": key,
             "role": role,
         }
         cfg["osc"]    = {"send_port": "9000", "recv_port": "9001"}
         cfg["filter"] = {
-            "; Parameter prefixes that will NOT be sent to master\nblacklist_prefix": "VF74_, VF73_, VF68_, VF_, VF , OGB/, bOSC/, Leash_, Tail_, grableash, hr_, Go/, M_, Gesture, Viseme, Voice, InStation, Seated, AFK, Upright, Earmuffs, ScaleModified, ScaleFactor, ScaleFactorInverse, EyeHeightAsMeters, EyeHeightAsPercent, VelocityX, VelocityY, VelocityZ, VelocityMagnitude, AngularY, Grounded, TrackingType, VRMode, IsOnFriendsList, IsAnimatorEnabled, PreviewMode, MuteSelf, VFH/, VF1",
+            "; Parameter prefixes that will NOT be sent to dom\nblacklist_prefix": "VF74_, VF73_, VF68_, VF_, VF , OGB/, bOSC/, Leash_, Tail_, grableash, hr_, Go/, M_, Gesture, Viseme, Voice, InStation, Seated, AFK, Upright, Earmuffs, ScaleModified, ScaleFactor, ScaleFactorInverse, EyeHeightAsMeters, EyeHeightAsPercent, VelocityX, VelocityY, VelocityZ, VelocityMagnitude, AngularY, Grounded, TrackingType, VRMode, IsOnFriendsList, IsAnimatorEnabled, PreviewMode, MuteSelf, VFH/, VF1",
             "; Throttle for float/int updates in milliseconds\nfloat_throttle_ms": "150",
         }
         cfg["paths"]  = {
@@ -122,7 +122,7 @@ ROLE     = config["general"]["role"].lower()
 OSC_PORT = int(config["osc"]["send_port"])
 OSC_RECV = int(config["osc"]["recv_port"])
 
-if ROLE == "master":
+if ROLE == "dom":
     raw  = config["general"].get("keys", "")
     KEYS = [k.strip() for k in raw.split(",") if k.strip()]
 else:
@@ -537,7 +537,7 @@ COMMANDS = {
     "trigger":      cmd_trigger,
 }
 
-# ── OSC Listener (Slave) ──────────────────────────────────────────────────────
+# ── OSC Listener (Sub) ──────────────────────────────────────────────────────
 osc_params      = {}      # name -> value
 osc_ws_ref      = None
 osc_loop        = None
@@ -603,16 +603,34 @@ def osc_avatar_change_handler(address, *args):
     avatar_id = str(args[0])
     log(f"[OSC] Avatar loaded: {avatar_id}")
 
-    # Parameter aus JSON lesen
-    params = read_avatar_params(avatar_id)
+    # Kurz warten damit VRChat OSCQuery aktualisiert
+    import threading
+    def send_after_delay():
+        import time
+        time.sleep(1.5)
+        # OSCQuery bevorzugen, JSON als Fallback
+        queried_id, params = get_current_avatar()
+        if not params:
+            params = read_avatar_params(avatar_id)
 
-    if osc_ws_ref and osc_loop:
-        payload = json.dumps({
-            "event":     "avatar_change",
-            "avatar_id": avatar_id,
-            "params":    params
-        })
-        asyncio.run_coroutine_threadsafe(osc_ws_ref.send(payload), osc_loop)
+        display_name = get_vrchat_display_name()
+        final_id = queried_id or avatar_id
+
+        # Sub GUI updaten
+        if sub_gui_instance:
+            sub_gui_instance.root.after(0, lambda a=final_id: sub_gui_instance.set_avatar(a))
+
+        if osc_ws_ref and osc_loop:
+            payload = json.dumps({
+                "event":        "avatar_change",
+                "avatar_id":    final_id,
+                "params":       params,
+                "display_name": display_name
+            })
+            asyncio.run_coroutine_threadsafe(osc_ws_ref.send(payload), osc_loop)
+            log(f"[OSC] Avatar change sent: {final_id} | {len(params)} params")
+
+    threading.Thread(target=send_after_delay, daemon=True).start()
 
 def start_osc_listener():
     d = dispatcher.Dispatcher()
@@ -632,7 +650,7 @@ def start_osc_listener():
         except OSError as e2:
             log(f"[!] OSC listener could not be started: {e2}")
 
-# ── GUI (Master) ──────────────────────────────────────────────────────────────
+# ── GUI (Dom) ──────────────────────────────────────────────────────────────
 def open_settings_window(parent_root):
     """Opens a settings window to change role and key(s), then restarts."""
     import subprocess
@@ -657,7 +675,7 @@ def open_settings_window(parent_root):
              font=("Segoe UI", 9, "bold"), width=8, anchor="w").pack(side="left")
     role_var = tk.StringVar(value=ROLE)
     ttk.Combobox(role_frame, textvariable=role_var,
-                 values=["slave", "master"],
+                 values=["sub", "dom"],
                  state="readonly", width=20).pack(side="left")
 
     # Key(s)
@@ -671,7 +689,7 @@ def open_settings_window(parent_root):
              insertbackground="#cdd6f4",
              font=("Segoe UI", 10), relief="flat", width=22).pack(side="left", ipady=3)
 
-    tk.Label(win, text="Master: comma-separated keys  |  Slave: single key",
+    tk.Label(win, text="Dom: comma-separated keys  |  Sub: single key",
              fg="#a6adc8", bg="#1e1e2e",
              font=("Segoe UI", 8)).pack()
 
@@ -701,16 +719,16 @@ def open_settings_window(parent_root):
               relief="flat", pady=6, cursor="hand2").pack(pady=20, padx=40, fill="x")
 
 
-class MasterGUI:
+class DomGUI:
     def __init__(self, send_callback):
         self.send_callback  = send_callback
         self.params         = {}
         self.current_avatar = None
-        self.slave_data      = {}
-        self.connected_slaves = set()
+        self.sub_data      = {}
+        self.connected_subs = set()
 
         self.root = tk.Tk()
-        self.root.title(f"VRChat OSC Remote v{CURRENT_VERSION} - Master")
+        self.root.title(f"VRChat OSC Remote v{CURRENT_VERSION} - Dom")
         self.root.geometry("750x800")
         self.root.configure(bg="#1e1e2e")
         self.root.resizable(True, True)
@@ -788,12 +806,12 @@ class MasterGUI:
         )
         self.status_label.pack(side="left", padx=12)
 
-        self.slave_label = tk.Label(
+        self.sub_label = tk.Label(
             header, text="",
             fg="#cdd6f4", bg="#313244",
             font=("Segoe UI", 10)
         )
-        self.slave_label.pack(side="left", padx=4)
+        self.sub_label.pack(side="left", padx=4)
 
         self.avatar_label = tk.Label(
             header, text="",
@@ -821,14 +839,14 @@ class MasterGUI:
             padx=8, pady=2, cursor="hand2"
         ).pack(side="right", padx=2)
 
-        # Slave Dropdown
+        # Sub Dropdown
         tk.Label(
-            header, text="Slave:",
+            header, text="Sub:",
             fg="#cba6f7", bg="#313244",
             font=("Segoe UI", 9)
         ).pack(side="left", padx=(12, 4))
 
-        self.slave_dropdown = ttk.Combobox(
+        self.sub_dropdown = ttk.Combobox(
             header,
             textvariable=self.selected_key,
             values=["All"],
@@ -836,8 +854,8 @@ class MasterGUI:
             width=24,
             font=("Segoe UI", 9)
         )
-        self.slave_dropdown.pack(side="left", padx=4)
-        self.slave_dropdown.bind("<<ComboboxSelected>>", self._on_slave_select)
+        self.sub_dropdown.pack(side="left", padx=4)
+        self.sub_dropdown.bind("<<ComboboxSelected>>", self._on_sub_select)
         self._display_to_key = {"All": "All"}
 
         # ── Aktions-Bereich ───────────────────────────────────────────────────
@@ -968,7 +986,7 @@ class MasterGUI:
 
         self.no_params_label = tk.Label(
             self.param_frame,
-            text="Waiting for avatar parameters from slave...",
+            text="Waiting for avatar parameters from sub...",
             fg="#585b70", bg="#1e1e2e",
             font=("Segoe UI", 10, "italic")
         )
@@ -1001,12 +1019,12 @@ class MasterGUI:
             # Frame des Widgets neu positionieren
             widget = entry.get("btn") or entry.get("slider") or entry.get("spinner")
             if widget:
-                parent = widget.master
+                parent = widget.dom
                 parent.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
             for c in range(cols):
                 self.param_frame.columnconfigure(c, weight=1)
 
-    def _on_slave_select(self, event=None):
+    def _on_sub_select(self, event=None):
         display = self.selected_key.get()
         key = getattr(self, "_display_to_key", {}).get(display, display)
 
@@ -1015,12 +1033,12 @@ class MasterGUI:
             self._clear_params()
             tk.Label(
                 self.param_frame,
-                text="All slaves selected – no avatar shown.",
+                text="All subs selected – no avatar shown.",
                 fg="#585b70", bg="#1e1e2e",
                 font=("Segoe UI", 10, "italic")
             ).pack(pady=20)
         else:
-            data      = self.slave_data.get(key, {})
+            data      = self.sub_data.get(key, {})
             avatar_id = data.get("avatar_id")
             params    = data.get("params", [])
             if avatar_id:
@@ -1037,7 +1055,7 @@ class MasterGUI:
             else:
                 tk.Label(
                     self.param_frame,
-                    text="No parameters for this slave.",
+                    text="No parameters for this sub.",
                     fg="#585b70", bg="#1e1e2e",
                     font=("Segoe UI", 10, "italic")
                 ).pack(pady=20)
@@ -1047,7 +1065,7 @@ class MasterGUI:
             widget.destroy()
         self.params = {}
 
-    def update_slave_list(self, keys_or_dict):
+    def update_sub_list(self, keys_or_dict):
         """Updates the dropdown. keys_or_dict can be a list or {key: name} dict."""
         if isinstance(keys_or_dict, dict):
             self._key_to_name = keys_or_dict
@@ -1060,16 +1078,20 @@ class MasterGUI:
             display_values = ["All"] + list(keys_or_dict)
             self._display_to_key = {"All": "All", **{k: k for k in keys_or_dict}}
 
-        self.slave_dropdown["values"] = display_values
+        self.sub_dropdown["values"] = display_values
         if self.selected_key.get() not in display_values:
             self.selected_key.set("All")
 
-    def set_slave_avatar(self, key, avatar_id, params):
-        """Stores avatar data for a slave and updates GUI if selected."""
-        self.slave_data[key] = {"avatar_id": avatar_id, "params": params}
-        # GUI updaten wenn dieser Slave gerade ausgewählt ist
-        if self.selected_key.get() == key:
-            self.root.after(0, lambda: self._on_slave_select())
+    def set_sub_avatar(self, key, avatar_id, params):
+        """Stores avatar data for a sub and updates GUI if selected."""
+        self.sub_data.setdefault(key, {})
+        self.sub_data[key]["avatar_id"] = avatar_id
+        self.sub_data[key]["params"]    = params
+        # GUI updaten wenn dieser Sub gerade ausgewählt ist
+        display  = self.selected_key.get()
+        sel_key  = getattr(self, "_display_to_key", {}).get(display, display)
+        if sel_key == key or sel_key == "All":
+            self.root.after(0, lambda: self._on_sub_select())
 
     def _open_settings(self):
         open_settings_window(self.root)
@@ -1193,8 +1215,8 @@ class MasterGUI:
             name = value[:idx]
             val  = value[idx+1:]
             key  = getattr(self, "_display_to_key", {}).get(self.selected_key.get(), self.selected_key.get())
-            if key and key != "All" and key in self.slave_data:
-                params = self.slave_data[key].get("params", [])
+            if key and key != "All" and key in self.sub_data:
+                params = self.sub_data[key].get("params", [])
                 for p in params:
                     if p["name"] == name:
                         try:
@@ -1209,27 +1231,27 @@ class MasterGUI:
                         break
         self.send_callback(cmd, value)
 
-    def set_status(self, connected, slave_key=None):
+    def set_status(self, connected, sub_key=None):
         if connected:
             self.status_label.config(text="● Connected", fg="#a6e3a1")
-            self.slave_label.config(text=f"Slave: {slave_key or '-'}")
+            self.sub_label.config(text=f"Sub: {sub_key or '-'}")
         else:
-            self.status_label.config(text="● Waiting for slave...", fg="#fab387")
-            self.slave_label.config(text="Slave: -")
+            self.status_label.config(text="● Waiting for sub...", fg="#fab387")
+            self.sub_label.config(text="Sub: -")
 
     def set_server_connected(self, key):
-        """Called when master connects to server but slave not yet online."""
-        self.status_label.config(text="● Waiting for slave...", fg="#fab387")
-        self.slave_label.config(text=f"Slave: -")
+        """Called when dom connects to server but sub not yet online."""
+        self.status_label.config(text="● Waiting for sub...", fg="#fab387")
+        self.sub_label.config(text=f"Sub: -")
 
     def load_avatar_params(self, avatar_id, params, key=None):
-        """Loads avatar parameters for a specific slave."""
+        """Loads avatar parameters for a specific sub."""
         if key:
-            self.set_slave_avatar(key, avatar_id, params)
+            self.set_sub_avatar(key, avatar_id, params)
         else:
-            if master_ws_connections:
-                k = master_ws_connections[0][0]
-                self.set_slave_avatar(k, avatar_id, params)
+            if dom_ws_connections:
+                k = dom_ws_connections[0][0]
+                self.set_sub_avatar(k, avatar_id, params)
 
     def _load_avatar_params_ui(self, avatar_id, params):
         # Alls leeren
@@ -1388,12 +1410,12 @@ class MasterGUI:
 
 # ── Globale Refs ──────────────────────────────────────────────────────────────
 gui_instance          = None
-master_ws_connections = []
-_master_loop          = None
+dom_ws_connections = []
+_dom_loop          = None
 
 def gui_send_callback(cmd, value):
-    if not master_ws_connections:
-        log("[GUI] No slave connected")
+    if not dom_ws_connections:
+        log("[GUI] No sub connected")
         return
     payload     = json.dumps({"cmd": cmd, "value": value})
     selected    = gui_instance.selected_key.get() if gui_instance else "All"
@@ -1401,48 +1423,59 @@ def gui_send_callback(cmd, value):
     real_key    = getattr(gui_instance, "_display_to_key", {}).get(selected, selected)
 
     if real_key == "All":
-        for key, ws in master_ws_connections:
-            asyncio.run_coroutine_threadsafe(ws.send(payload), _master_loop)
+        for key, ws in dom_ws_connections:
+            asyncio.run_coroutine_threadsafe(ws.send(payload), _dom_loop)
     else:
-        for key, ws in master_ws_connections:
+        for key, ws in dom_ws_connections:
             if key == real_key:
-                asyncio.run_coroutine_threadsafe(ws.send(payload), _master_loop)
+                asyncio.run_coroutine_threadsafe(ws.send(payload), _dom_loop)
                 break
 
-# ── Slave Loop ────────────────────────────────────────────────────────────────
-async def slave_loop(ws):
+# ── Sub Loop ────────────────────────────────────────────────────────────────
+async def sub_loop(ws):
     async for message in ws:
         try:
             data = json.loads(message)
             if "event" in data:
                 e = data["event"]
                 if e == "state":
-                    master_count = data.get("master_count", 0)
-                    log(f"[*] State update: {master_count} master(s)")
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda c=master_count: slave_gui_instance.set_status(c > 0, c))
-                elif e == "master_connected":
+                    dom_count = data.get("dom_count", 0)
+                    log(f"[*] State update: {dom_count} dom(s)")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
+                        # Refresh name and avatar in case of reconnect
+                        dn = get_vrchat_display_name() or KEYS[0]
+                        sub_gui_instance.root.after(0, lambda n=dn: sub_gui_instance.set_name(n))
+                        av_id = sub_gui_instance.var_avatar.get()
+                        if av_id and av_id != "-":
+                            sub_gui_instance.root.after(0, lambda a=av_id: sub_gui_instance.set_avatar(a))
+                elif e == "dom_connected":
                     count = data.get('count', '?')
-                    log(f"[*] Master connected! (Total: {count})")
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda c=count: slave_gui_instance.set_status(True, c))
-                elif e == "master_disconnected":
+                    log(f"[*] Dom connected! (Total: {count})")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda c=count: sub_gui_instance.set_status(True, c))
+                elif e == "dom_disconnected":
                     count = data.get('count', 0)
-                    log(f"[!] Master disconnected (Remaining: {count})")
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda c=count: slave_gui_instance.set_status(c > 0, c))
-                elif e == "waiting_for_master":
-                    log("[*] Waiting for master...")
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda: slave_gui_instance.set_status(False))
+                    log(f"[!] Dom disconnected (Remaining: {count})")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda c=count: sub_gui_instance.set_status(c > 0, c))
+                elif e == "waiting_for_dom":
+                    log("[*] Waiting for dom...")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda: sub_gui_instance.set_status(False))
                 elif e == "request_avatar":
-                    # Master fragt nach aktuellem Avatar
+                    # Dom fragt nach aktuellem Avatar
                     avatar_id, params = get_current_avatar()
+                    display_name = get_vrchat_display_name() or KEYS[0]
                     if avatar_id and osc_ws_ref:
+                        if sub_gui_instance:
+                            sub_gui_instance.root.after(0, lambda a=avatar_id: sub_gui_instance.set_avatar(a))
+                            sub_gui_instance.root.after(0, lambda n=display_name: sub_gui_instance.set_name(n))
                         payload_out = json.dumps({
-                            "event":     "avatar_change",
-                            "avatar_id": avatar_id,
-                            "params":    params
+                            "event":        "avatar_change",
+                            "avatar_id":    avatar_id,
+                            "params":       params,
+                            "display_name": display_name
                         })
                         await ws.send(payload_out)
                         log(f"[*] Avatar sent on request: {avatar_id}")
@@ -1457,7 +1490,7 @@ async def slave_loop(ws):
         except json.JSONDecodeError:
             log("[!] Ungültige Nachricht")
 
-# ── Master Loop (Terminal) ────────────────────────────────────────────────────
+# ── Dom Loop (Terminal) ────────────────────────────────────────────────────
 def print_help(keys):
     print()
     print("  Connected keys:")
@@ -1473,17 +1506,17 @@ def print_help(keys):
     print("  help | quit")
     print()
 
-async def master_loop(connections):
-    global master_ws_connections
-    master_ws_connections = connections
+async def dom_loop(connections):
+    global dom_ws_connections
+    dom_ws_connections = connections
     keys = [k for k, _ in connections]
     log(f"[MASTER] Connected with {len(connections)} key(s)")
     print_help(keys)
 
     if gui_instance:
-        if not gui_instance.connected_slaves:
+        if not gui_instance.connected_subs:
             gui_instance.set_server_connected(keys[0] if keys else "-")
-        # Dropdown bleibt leer bis Slaves verbinden
+        # Dropdown bleibt leer bis Subs verbinden
 
     loop = asyncio.get_event_loop()
 
@@ -1558,7 +1591,7 @@ async def keepalive_monitor(ws, role, key, disconnected_event):
         pass
 
 # ── Verbindungen ──────────────────────────────────────────────────────────────
-async def connect_as_slave():
+async def connect_as_sub():
     global osc_ws_ref, osc_loop
     key    = KEYS[0]
     attempt = 0
@@ -1573,7 +1606,7 @@ async def connect_as_slave():
             log(f"Connecting as SLAVE | Key: {key} | Attempt #{attempt}")
             async with websockets.connect(SERVER) as ws:
                 osc_ws_ref = ws
-                await ws.send(json.dumps({"key": key, "role": "slave"}))
+                await ws.send(json.dumps({"key": key, "role": "sub"}))
                 first = json.loads(await ws.recv())
 
                 if "error" in first:
@@ -1582,33 +1615,33 @@ async def connect_as_slave():
                     continue
 
                 if first.get("event") == "state":
-                    master_count = first.get("master_count", 0)
-                    log(f"[*] Connected – {master_count} master(s) online")
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda c=master_count: slave_gui_instance.set_status(c > 0, c))
-                elif first.get("event") == "waiting_for_master":
-                    log("[*] Connected – waiting for master...")
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda: slave_gui_instance.set_status(False))
-                elif first.get("event") == "master_connected":
-                    log(f"[*] Connected – master active!")
+                    dom_count = first.get("dom_count", 0)
+                    log(f"[*] Connected – {dom_count} dom(s) online")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
+                elif first.get("event") == "waiting_for_dom":
+                    log("[*] Connected – waiting for dom...")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda: sub_gui_instance.set_status(False))
+                elif first.get("event") == "dom_connected":
+                    log(f"[*] Connected – dom active!")
                     count = first.get("count", 1)
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda c=count: slave_gui_instance.set_status(True, c))
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda c=count: sub_gui_instance.set_status(True, c))
 
                 attempt = 0
 
                 # Display Name ermitteln
                 display_name = get_vrchat_display_name() or KEYS[0]
                 log(f"[*] Display name: {display_name}")
-                if slave_gui_instance:
-                    slave_gui_instance.root.after(0, lambda n=display_name: slave_gui_instance.set_name(n))
+                if sub_gui_instance:
+                    sub_gui_instance.root.after(0, lambda n=display_name: sub_gui_instance.set_name(n))
 
                 # Aktuellen Avatar sofort senden
                 avatar_id, params = get_current_avatar()
                 if avatar_id:
-                    if slave_gui_instance:
-                        slave_gui_instance.root.after(0, lambda a=avatar_id: slave_gui_instance.set_avatar(a))
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda a=avatar_id: sub_gui_instance.set_avatar(a))
                     payload = json.dumps({
                         "event":        "avatar_change",
                         "avatar_id":    avatar_id,
@@ -1619,15 +1652,15 @@ async def connect_as_slave():
                     log(f"[*] Current avatar sent: {avatar_id}")
                 else:
                     await ws.send(json.dumps({
-                        "event":        "slave_info",
+                        "event":        "sub_info",
                         "display_name": display_name
                     }))
                 disconnected = asyncio.Event()
-                ka_task    = asyncio.ensure_future(keepalive_monitor(ws, "slave", key, disconnected))
-                slave_task = asyncio.ensure_future(slave_loop(ws))
+                ka_task    = asyncio.ensure_future(keepalive_monitor(ws, "sub", key, disconnected))
+                sub_task = asyncio.ensure_future(sub_loop(ws))
 
                 done, pending = await asyncio.wait(
-                    [slave_task, asyncio.ensure_future(disconnected.wait())],
+                    [sub_task, asyncio.ensure_future(disconnected.wait())],
                     return_when=asyncio.FIRST_COMPLETED
                 )
                 for t in pending: t.cancel()
@@ -1643,7 +1676,7 @@ async def connect_as_slave():
         log(f"    Reconnect in {RECONNECT_DELAY}s...")
         await asyncio.sleep(RECONNECT_DELAY)
 
-async def connect_as_master():
+async def connect_as_dom():
     global gui_instance
     attempt = 0
 
@@ -1657,7 +1690,7 @@ async def connect_as_master():
             for key in KEYS:
                 log(f"Connecting as MASTER | Key: {key} | Attempt #{attempt}")
                 ws = await websockets.connect(SERVER)
-                await ws.send(json.dumps({"key": key, "role": "master"}))
+                await ws.send(json.dumps({"key": key, "role": "dom"}))
                 first = json.loads(await ws.recv())
 
                 if "error" in first:
@@ -1666,42 +1699,42 @@ async def connect_as_master():
                     continue
 
                 if first.get("event") == "state":
-                    slave_online = first.get("slave_online", False)
+                    sub_online = first.get("sub_online", False)
                     dn           = first.get("display_name")
-                    log(f"[*] State: slave_online={slave_online} | Key: {key}")
+                    log(f"[*] State: sub_online={sub_online} | Key: {key}")
                     if gui_instance:
-                        if slave_online:
+                        if sub_online:
                             gui_instance.set_status(True, key)
                             if dn and dn != key:
-                                gui_instance.connected_slaves.add(key)
-                                gui_instance.slave_data.setdefault(key, {})["display_name"] = dn
-                                gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_slave_list(
-                                    {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                     for mk in gui_instance.connected_slaves}
+                                gui_instance.connected_subs.add(key)
+                                gui_instance.sub_data.setdefault(key, {})["display_name"] = dn
+                                gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_sub_list(
+                                    {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                     for mk in gui_instance.connected_subs}
                                 ))
                         else:
-                            if not gui_instance.connected_slaves:
+                            if not gui_instance.connected_subs:
                                 gui_instance.set_server_connected(key)
-                elif first.get("event") == "slave_connected":
-                    log(f"[*] Slave already connected | Key: {key}")
+                elif first.get("event") == "sub_connected":
+                    log(f"[*] Sub already connected | Key: {key}")
                     if gui_instance:
                         gui_instance.set_status(True, key)
                         dn = first.get("display_name")
                         if dn and dn != key:
-                            gui_instance.connected_slaves.add(key)
-                            gui_instance.slave_data.setdefault(key, {})["display_name"] = dn
-                            gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_slave_list(
-                                {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                 for mk in gui_instance.connected_slaves}
+                            gui_instance.connected_subs.add(key)
+                            gui_instance.sub_data.setdefault(key, {})["display_name"] = dn
+                            gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_sub_list(
+                                {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                 for mk in gui_instance.connected_subs}
                             ))
                 else:
-                    log(f"[*] Waiting for slave | Key: {key}")
-                    if gui_instance and not gui_instance.connected_slaves:
+                    log(f"[*] Waiting for sub | Key: {key}")
+                    if gui_instance and not gui_instance.connected_subs:
                         gui_instance.set_server_connected(key)
 
                 connections.append((key, ws))
                 ka_tasks.append(asyncio.ensure_future(
-                    keepalive_monitor(ws, "master", key, disconnected)
+                    keepalive_monitor(ws, "dom", key, disconnected)
                 ))
 
             if not connections:
@@ -1720,48 +1753,48 @@ async def connect_as_master():
                         e = data["event"]
 
                         if e == "state":
-                            slave_online = data.get("slave_online", False)
+                            sub_online = data.get("sub_online", False)
                             dn           = data.get("display_name")
                             if gui_instance:
-                                if slave_online:
+                                if sub_online:
                                     gui_instance.set_status(True, key)
                                     if dn and dn != key:
-                                        gui_instance.connected_slaves.add(key)
-                                        gui_instance.slave_data.setdefault(key, {})["display_name"] = dn
-                                        gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_slave_list(
-                                            {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                             for mk in gui_instance.connected_slaves}
+                                        gui_instance.connected_subs.add(key)
+                                        gui_instance.sub_data.setdefault(key, {})["display_name"] = dn
+                                        gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_sub_list(
+                                            {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                             for mk in gui_instance.connected_subs}
                                         ))
                                 else:
-                                    gui_instance.connected_slaves.discard(key)
-                                    if not gui_instance.connected_slaves:
+                                    gui_instance.connected_subs.discard(key)
+                                    if not gui_instance.connected_subs:
                                         gui_instance.set_server_connected(key)
-                                    gui_instance.root.after(0, lambda k=key: gui_instance.update_slave_list(
-                                        {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                         for mk in gui_instance.connected_slaves}
+                                    gui_instance.root.after(0, lambda k=key: gui_instance.update_sub_list(
+                                        {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                         for mk in gui_instance.connected_subs}
                                     ))
 
-                        elif e == "slave_connected":
-                            log(f"[*] Slave connected | Key: {key}")
+                        elif e == "sub_connected":
+                            log(f"[*] Sub connected | Key: {key}")
                             if gui_instance:
                                 gui_instance.set_status(True, key)
                                 dn = data.get("display_name")
                                 if dn and dn != key:
-                                    gui_instance.connected_slaves.add(key)
-                                    gui_instance.slave_data.setdefault(key, {})["display_name"] = dn
-                                    gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_slave_list(
-                                        {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                         for mk in gui_instance.connected_slaves}
+                                    gui_instance.connected_subs.add(key)
+                                    gui_instance.sub_data.setdefault(key, {})["display_name"] = dn
+                                    gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_sub_list(
+                                        {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                         for mk in gui_instance.connected_subs}
                                     ))
 
-                        elif e == "slave_disconnected":
-                            log(f"[!] Slave disconnected | Key: {key}")
+                        elif e == "sub_disconnected":
+                            log(f"[!] Sub disconnected | Key: {key}")
                             if gui_instance:
-                                gui_instance.connected_slaves.discard(key)
+                                gui_instance.connected_subs.discard(key)
                                 gui_instance.set_status(False)
-                                gui_instance.root.after(0, lambda k=key: gui_instance.update_slave_list(
-                                    {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                     for mk in gui_instance.connected_slaves}
+                                gui_instance.root.after(0, lambda k=key: gui_instance.update_sub_list(
+                                    {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                     for mk in gui_instance.connected_subs}
                                 ))
 
                         elif e == "avatar_change":
@@ -1770,26 +1803,26 @@ async def connect_as_master():
                             display_name = data.get("display_name")
                             log(f"[*] Avatar changed: {avatar_id} | {len(params)} params | Name: {display_name}")
                             if gui_instance and display_name and display_name != key:
-                                gui_instance.connected_slaves.add(key)
+                                gui_instance.connected_subs.add(key)
                                 def _update_list(k=key, n=display_name):
-                                    gui_instance.slave_data.setdefault(k, {})["display_name"] = n
-                                    gui_instance.update_slave_list(
-                                        {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                         for mk in gui_instance.connected_slaves}
+                                    gui_instance.sub_data.setdefault(k, {})["display_name"] = n
+                                    gui_instance.update_sub_list(
+                                        {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                         for mk in gui_instance.connected_subs}
                                     )
                                 gui_instance.root.after(100, _update_list)
                             if gui_instance:
-                                gui_instance.load_avatar_params(avatar_id, params, key=key)
+                                gui_instance.root.after(0, lambda a=avatar_id, p=params, k=key: gui_instance.load_avatar_params(a, p, key=k))
 
-                        elif e == "slave_info" and gui_instance:
+                        elif e == "sub_info" and gui_instance:
                             display_name = data.get("display_name")
                             if display_name and display_name != key:
-                                gui_instance.connected_slaves.add(key)
+                                gui_instance.connected_subs.add(key)
                                 def _update_info(k=key, n=display_name):
-                                    gui_instance.slave_data.setdefault(k, {})["display_name"] = n
-                                    gui_instance.update_slave_list(
-                                        {mk: gui_instance.slave_data.get(mk, {}).get("display_name", mk)
-                                         for mk in gui_instance.connected_slaves}
+                                    gui_instance.sub_data.setdefault(k, {})["display_name"] = n
+                                    gui_instance.update_sub_list(
+                                        {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                         for mk in gui_instance.connected_subs}
                                     )
                                 gui_instance.root.after(0, _update_info)
 
@@ -1800,17 +1833,17 @@ async def connect_as_master():
                                 data.get("type", "float")
                             )
 
-                        elif e == "no_slave":
-                            pass  # Kein Slave für diesen Key – still ignorieren
+                        elif e == "no_sub":
+                            pass  # Kein Sub für diesen Key – still ignorieren
 
                 except Exception:
                     disconnected.set()
 
             listeners   = [asyncio.ensure_future(listen(k, w)) for k, w in connections]
-            master_task = asyncio.ensure_future(master_loop(connections))
+            dom_task = asyncio.ensure_future(dom_loop(connections))
 
             await asyncio.wait(
-                [master_task, asyncio.ensure_future(disconnected.wait())],
+                [dom_task, asyncio.ensure_future(disconnected.wait())],
                 return_when=asyncio.FIRST_COMPLETED
             )
 
@@ -1819,7 +1852,7 @@ async def connect_as_master():
                 if gui_instance:
                     gui_instance.set_status(False)
 
-            master_task.cancel()
+            dom_task.cancel()
             for t in listeners + ka_tasks: t.cancel()
             for _, ws in connections:
                 try: await ws.close()
@@ -1835,17 +1868,17 @@ async def connect_as_master():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 async def async_main():
-    if ROLE == "slave":
-        await connect_as_slave()
+    if ROLE == "sub":
+        await connect_as_sub()
     else:
-        await connect_as_master()
+        await connect_as_dom()
 
-slave_gui_instance = None
+sub_gui_instance = None
 
-class SlaveGUI:
+class SubGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title(f"VRChat OSC Remote v{CURRENT_VERSION} - Slave")
+        self.root.title(f"VRChat OSC Remote v{CURRENT_VERSION} - Sub")
         self.root.geometry("500x680")
         self.root.configure(bg="#1e1e2e")
         self.root.resizable(False, False)
@@ -1922,13 +1955,13 @@ class SlaveGUI:
         self.var_key     = tk.StringVar(value=KEYS[0])
         self.var_name    = tk.StringVar(value="-")
         self.var_avatar  = tk.StringVar(value="-")
-        self.var_master  = tk.StringVar(value="Waiting...")
+        self.var_dom  = tk.StringVar(value="Waiting...")
         self.var_port    = tk.StringVar(value=str(OSC_RECV))
 
         info_row("Key:",        self.var_key)
         info_row("Name:",       self.var_name)
         info_row("Avatar:",     self.var_avatar)
-        info_row("Master:",     self.var_master)
+        info_row("Dom:",     self.var_dom)
         info_row("OSC Port:",   self.var_port)
 
         # Log preview (letzte 8 Zeilen)
@@ -1974,18 +2007,18 @@ class SlaveGUI:
         self._log_text.see("end")
         self._log_text.config(state="disabled")
 
-    def set_status(self, connected, master_count=0):
+    def set_status(self, connected, dom_count=0):
         if connected:
-            self.status_label.config(text=f"● Connected | {master_count} master(s)", fg="#a6e3a1")
-            self.var_master.set(f"{master_count} connected")
+            self.status_label.config(text=f"● Connected | {dom_count} dom(s)", fg="#a6e3a1")
+            self.var_dom.set(f"{dom_count} connected")
         else:
-            self.status_label.config(text="● Connected | Waiting for master...", fg="#fab387")
-            self.var_master.set("Waiting...")
+            self.status_label.config(text="● Connected | Waiting for dom...", fg="#fab387")
+            self.var_dom.set("Waiting...")
 
     def set_server_status(self, connected):
         if not connected:
             self.status_label.config(text="● Connecting...", fg="#f38ba8")
-            self.var_master.set("Waiting...")
+            self.var_dom.set("Waiting...")
 
     def set_avatar(self, avatar_id):
         self.var_avatar.set(avatar_id if avatar_id else "-")
@@ -1997,7 +2030,7 @@ class SlaveGUI:
         open_settings_window(self.root)
 
     def _open_log_window(self):
-        # Gleiche Log-Fenster Logik wie Master
+        # Gleiche Log-Fenster Logik wie Dom
         win = tk.Toplevel(self.root)
         win.title("Logs")
         win.geometry("800x500")
@@ -2042,7 +2075,7 @@ class SlaveGUI:
 
 
 def main():
-    global gui_instance, _master_loop, slave_gui_instance
+    global gui_instance, _dom_loop, sub_gui_instance
     _init_log_file()
     check_for_updates()
 
@@ -2053,14 +2086,14 @@ def main():
     log(f"Server: {SERVER}")
     log(f"Keys:   {', '.join(KEYS)}")
     log(f"OSC ->  127.0.0.1:{OSC_PORT}")
-    if ROLE == "slave":
+    if ROLE == "sub":
         osc_path = find_vrchat_osc_path()
         log(f"VRChat OSC path: {osc_path or 'not found'}")
     print()
 
-    if ROLE == "master":
+    if ROLE == "dom":
         loop = asyncio.new_event_loop()
-        _master_loop = loop
+        _dom_loop = loop
 
         def run_loop():
             asyncio.set_event_loop(loop)
@@ -2069,20 +2102,20 @@ def main():
         net_thread = threading.Thread(target=run_loop, daemon=True)
         net_thread.start()
 
-        gui_instance = MasterGUI(gui_send_callback)
+        gui_instance = DomGUI(gui_send_callback)
         gui_instance.run()
     else:
         loop = asyncio.new_event_loop()
 
-        def run_slave_loop():
+        def run_sub_loop():
             asyncio.set_event_loop(loop)
             loop.run_until_complete(async_main())
 
-        net_thread = threading.Thread(target=run_slave_loop, daemon=True)
+        net_thread = threading.Thread(target=run_sub_loop, daemon=True)
         net_thread.start()
 
-        slave_gui_instance = SlaveGUI()
-        slave_gui_instance.run()
+        sub_gui_instance = SubGUI()
+        sub_gui_instance.run()
 
 try:
     main()
