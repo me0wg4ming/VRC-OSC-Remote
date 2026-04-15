@@ -1878,17 +1878,30 @@ async def connect_as_sub():
                 if first.get("event") == "state":
                     dom_count = first.get("dom_count", 0)
                     log(f"[*] Connected – {dom_count} dom(s) online")
+                    # Warten bis GUI bereit ist
+                    for _ in range(20):
+                        if sub_gui_instance:
+                            break
+                        await asyncio.sleep(0.25)
                     if sub_gui_instance:
                         sub_gui_instance.root.after(100, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
                 elif first.get("event") == "waiting_for_dom":
                     log("[*] Connected – waiting for dom...")
+                    for _ in range(20):
+                        if sub_gui_instance:
+                            break
+                        await asyncio.sleep(0.25)
                     if sub_gui_instance:
-                        sub_gui_instance.root.after(0, lambda: sub_gui_instance.set_status(False))
+                        sub_gui_instance.root.after(100, lambda: sub_gui_instance.set_status(False))
                 elif first.get("event") == "dom_connected":
                     log(f"[*] Connected – dom active!")
                     count = first.get("count", 1)
+                    for _ in range(20):
+                        if sub_gui_instance:
+                            break
+                        await asyncio.sleep(0.25)
                     if sub_gui_instance:
-                        sub_gui_instance.root.after(0, lambda c=count: sub_gui_instance.set_status(True, c))
+                        sub_gui_instance.root.after(100, lambda c=count: sub_gui_instance.set_status(True, c))
 
                 attempt = 0
 
