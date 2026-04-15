@@ -296,6 +296,52 @@ def get_vrchat_display_name():
         log(f"[!] Log error: {e}")
     return None
 
+def get_vrchat_user_id():
+    """Reads VRChat user ID from the latest log."""
+    appdata = os.environ.get("APPDATA", "")
+    if not appdata:
+        return None
+    local_low = os.path.join(os.path.dirname(appdata), "LocalLow")
+    log_dir   = os.path.join(local_low, "VRChat", "VRChat")
+    log_files = glob.glob(os.path.join(log_dir, "output_log_*.txt"))
+    if not log_files:
+        return None
+    latest_log = max(log_files, key=os.path.getmtime)
+    try:
+        with open(latest_log, "r", encoding="utf-8", errors="ignore") as f:
+            for line in reversed(f.readlines()):
+                if "User Authenticated:" in line:
+                    match = _re.search(r"\((usr_[a-f0-9\-]+)\)", line)
+                    if match:
+                        return match.group(1).strip()
+    except Exception as e:
+        log(f"[!] User ID error: {e}")
+    return None
+
+def get_avatar_list():
+    """Reads all avatar JSONs from OSC folder and returns {id: name} dict."""
+    osc_path = find_vrchat_osc_path()
+    user_id  = get_vrchat_user_id()
+    if not osc_path or not user_id:
+        return {}
+    avatar_dir = os.path.join(osc_path, user_id, "Avatars")
+    if not os.path.exists(avatar_dir):
+        return {}
+    avatars = {}
+    for f in glob.glob(os.path.join(avatar_dir, "avtr_*.json")):
+        try:
+            with open(f, "r", encoding="utf-8-sig") as fh:
+                data = json.load(fh)
+            av_id   = data.get("id", "")
+            av_name = data.get("name", av_id)
+            if av_id:
+                avatars[av_id] = av_name
+        except Exception:
+            pass
+    log(f"[*] Avatar list: {len(avatars)} avatars found")
+    return avatars
+
+
 def get_oscquery_port():
     """Reads the OSCQuery port from the latest VRChat log."""
     appdata = os.environ.get("APPDATA", "")
@@ -320,7 +366,6 @@ def get_oscquery_port():
     return None
 
 def parse_oscquery_node(node, results):
-    """Parst einen OSCQuery Node rekursiv."""
     if not isinstance(node, dict):
         return
 
@@ -721,23 +766,27 @@ def open_settings_window(parent_root):
 
 class DomGUI:
     def __init__(self, send_callback):
-        self.send_callback  = send_callback
-        self.params         = {}
-        self.current_avatar = None
-        self.sub_data      = {}
-        self.connected_subs = set()
+        self.send_callback    = send_callback
+        self.params           = {}
+        self.current_avatar   = None
+        self._current_avatar_id = None
+        self.sub_data         = {}
+        self.connected_subs   = set()
 
         self.root = tk.Tk()
         self.root.title(f"VRChat OSC Remote v{CURRENT_VERSION} - Dom")
-        self.root.geometry("750x800")
         self.root.configure(bg="#1e1e2e")
         self.root.resizable(True, True)
         self._last_width = 750
         self._resize_job = None
 
+        # Fensterposition/-größe laden
+        self._win_cfg_path = os.path.join(_BASE_DIR, "window_dom.ini")
+        self._load_window_geometry()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_dom)
+
         # Fenster-Icon setzen
         try:
-            import os, sys
             icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
             if not os.path.exists(icon_path):
                 icon_path = os.path.join(os.path.dirname(sys.executable), "icon.ico")
@@ -748,7 +797,6 @@ class DomGUI:
 
         # Fenster-Icon setzen
         try:
-            import os, sys
             ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
             if not os.path.exists(ico_path):
                 ico_path = os.path.join(os.path.dirname(sys.executable), "icon.ico")
@@ -765,7 +813,6 @@ class DomGUI:
         # ── Banner ────────────────────────────────────────────────────────────
         try:
             from PIL import Image, ImageTk
-            import os, sys
             banner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "banner.png")
             if not os.path.exists(banner_path):
                 banner_path = os.path.join(os.path.dirname(sys.executable), "banner.png")
@@ -819,6 +866,8 @@ class DomGUI:
             font=("Segoe UI", 9)
         )
         self.avatar_label.pack(side="left", padx=12)
+
+        self._avatar_key  = None
 
         # Log Button
         tk.Button(
@@ -935,6 +984,47 @@ class DomGUI:
         self._bind_move_btn(self.btn_rot_right,  "rotate_right", "stop_rotate")
         self.btn_jump_pad.bind("<ButtonPress-1>", lambda e: self.send_cmd("jump", "1"))
 
+        # ── Presets ───────────────────────────────────────────────────────────
+        preset_frame = tk.LabelFrame(
+            self.root, text=" Presets ",
+            fg="#cba6f7", bg="#1e1e2e",
+            font=("Segoe UI", 9, "bold")
+        )
+        preset_frame.pack(fill="x", padx=10, pady=(2, 2))
+
+        self._preset_var = tk.StringVar(value="")
+        self._preset_dropdown = ttk.Combobox(
+            preset_frame, textvariable=self._preset_var,
+            values=[], state="readonly", width=28,
+            font=("Segoe UI", 9)
+        )
+        self._preset_dropdown.pack(side="left", padx=6, pady=5)
+
+        tk.Button(preset_frame, text="▶ Load",
+                  command=self._load_preset,
+                  bg="#89b4fa", fg="#1e1e2e",
+                  font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=8, pady=2,
+                  cursor="hand2").pack(side="left", padx=2, pady=5)
+
+        tk.Button(preset_frame, text="💾 Save",
+                  command=self._save_preset_dialog,
+                  bg="#a6e3a1", fg="#1e1e2e",
+                  font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=8, pady=2,
+                  cursor="hand2").pack(side="left", padx=2, pady=5)
+
+        tk.Button(preset_frame, text="🗑 Delete",
+                  command=self._delete_preset,
+                  bg="#f38ba8", fg="#1e1e2e",
+                  font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=8, pady=2,
+                  cursor="hand2").pack(side="left", padx=2, pady=5)
+
+        self._presets_path = os.path.join(_BASE_DIR, "presets.json")
+        self._presets = self._load_presets_file()
+        self._current_avatar_id = None
+
         # ── Chatbox ───────────────────────────────────────────────────────────
         chat_frame = tk.Frame(self.root, bg="#1e1e2e")
         chat_frame.pack(fill="x", padx=10, pady=2)
@@ -964,6 +1054,25 @@ class DomGUI:
             font=("Segoe UI", 9, "bold")
         )
         param_outer.pack(fill="both", expand=True, padx=10, pady=(4, 4))
+
+        # Suchfeld
+        search_frame = tk.Frame(param_outer, bg="#1e1e2e")
+        search_frame.pack(fill="x", padx=6, pady=(6, 2))
+        tk.Label(search_frame, text="🔍", bg="#1e1e2e", fg="#cdd6f4",
+                 font=("Segoe UI", 10)).pack(side="left", padx=(0, 4))
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *a: self._filter_params())
+        tk.Entry(search_frame, textvariable=self._search_var,
+                 bg="#313244", fg="#cdd6f4",
+                 insertbackground="#cdd6f4",
+                 font=("Segoe UI", 9), relief="flat"
+                 ).pack(side="left", fill="x", expand=True, ipady=3)
+        tk.Button(search_frame, text="✕",
+                  command=lambda: self._search_var.set(""),
+                  bg="#45475a", fg="#cdd6f4",
+                  font=("Segoe UI", 9), relief="flat",
+                  padx=6, cursor="hand2"
+                  ).pack(side="left", padx=(4, 0))
 
         canvas    = tk.Canvas(param_outer, bg="#1e1e2e", highlightthickness=0)
         scrollbar = ttk.Scrollbar(param_outer, orient="vertical", command=canvas.yview)
@@ -1092,6 +1201,153 @@ class DomGUI:
         sel_key  = getattr(self, "_display_to_key", {}).get(display, display)
         if sel_key == key or sel_key == "All":
             self.root.after(0, lambda: self._on_sub_select())
+
+    def _load_presets_file(self) -> dict:
+        try:
+            if os.path.exists(self._presets_path):
+                with open(self._presets_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def _save_presets_file(self):
+        try:
+            with open(self._presets_path, "w", encoding="utf-8") as f:
+                json.dump(self._presets, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            log(f"[!] Error saving presets: {e}")
+
+    def _update_preset_dropdown(self):
+        avatar_id = self._current_avatar_id
+        if not avatar_id or avatar_id not in self._presets or not self._presets[avatar_id]:
+            self._preset_dropdown["values"] = []
+            self._preset_var.set("")
+            self._preset_dropdown.set("")
+            return
+        names = list(self._presets[avatar_id].keys())
+        self._preset_dropdown["values"] = names
+        self._preset_var.set(names[0])
+
+    def _load_preset(self):
+        name     = self._preset_var.get()
+        av_id    = self._current_avatar_id
+        if not name or not av_id:
+            return
+        preset = self._presets.get(av_id, {}).get(name)
+        if not preset:
+            return
+        # Apply all parameter values
+        for param_name, value in preset.items():
+            self.send_cmd("avatar_param", f"{param_name}:{1 if value else 0}")
+            # Update button state in GUI
+            if param_name in self.params:
+                entry = self.params[param_name]
+                if entry["type"] == "bool":
+                    entry["state"] = bool(value)
+                    entry["btn"].config(
+                        bg="#a6e3a1" if value else "#45475a",
+                        fg="#1e1e2e" if value else "#cdd6f4",
+                        text=f"{param_name}\n{'ON' if value else 'OFF'}"
+                    )
+                elif entry["type"] == "int" and "var" in entry:
+                    entry["var"].set(int(value))
+        log(f"[*] Preset loaded: {name}")
+
+    def _save_preset_dialog(self):
+        av_id = self._current_avatar_id
+        if not av_id:
+            from tkinter import messagebox
+            messagebox.showinfo("Presets", "No avatar connected yet.", parent=self.root)
+            return
+        if not self.params:
+            from tkinter import messagebox
+            messagebox.showinfo("Presets", "No parameters to save.", parent=self.root)
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Save Preset")
+        win.geometry("300x130")
+        win.configure(bg="#1e1e2e")
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="Preset name:", fg="#cba6f7", bg="#1e1e2e",
+                 font=("Segoe UI", 9, "bold")).pack(pady=(16, 4))
+        name_var = tk.StringVar(value=self._preset_var.get() or "")
+        tk.Entry(win, textvariable=name_var, bg="#313244", fg="#cdd6f4",
+                 insertbackground="#cdd6f4",
+                 font=("Segoe UI", 10), relief="flat").pack(padx=20, fill="x", ipady=4)
+
+        def do_save():
+            name = name_var.get().strip()
+            if not name:
+                return
+            # Save current param states
+            snapshot = {}
+            for param_name, entry in self.params.items():
+                if entry["type"] == "bool":
+                    snapshot[param_name] = entry.get("state", False)
+                elif entry["type"] == "int" and "var" in entry:
+                    snapshot[param_name] = entry["var"].get()
+            if av_id not in self._presets:
+                self._presets[av_id] = {}
+            self._presets[av_id][name] = snapshot
+            self._save_presets_file()
+            self._update_preset_dropdown()
+            self._preset_var.set(name)
+            log(f"[*] Preset saved: {name} ({len(snapshot)} params)")
+            win.destroy()
+
+        tk.Button(win, text="Save", command=do_save,
+                  bg="#a6e3a1", fg="#1e1e2e",
+                  font=("Segoe UI", 9, "bold"),
+                  relief="flat", pady=4, cursor="hand2").pack(pady=10, padx=20, fill="x")
+        win.bind("<Return>", lambda e: do_save())
+
+    def _delete_preset(self):
+        name  = self._preset_var.get()
+        av_id = self._current_avatar_id
+        if not name or not av_id:
+            return
+        from tkinter import messagebox
+        if messagebox.askyesno("Delete Preset", f"Delete preset '{name}'?", parent=self.root):
+            self._presets.get(av_id, {}).pop(name, None)
+            self._save_presets_file()
+            self._update_preset_dropdown()
+            log(f"[*] Preset deleted: {name}")
+
+    def _load_window_geometry(self):
+        try:
+            if os.path.exists(self._win_cfg_path):
+                with open(self._win_cfg_path, "r") as f:
+                    geo = f.read().strip()
+                self.root.geometry(geo)
+            else:
+                self.root.geometry("750x800")
+        except Exception:
+            self.root.geometry("750x800")
+
+    def _save_window_geometry(self):
+        try:
+            with open(self._win_cfg_path, "w") as f:
+                f.write(self.root.geometry())
+        except Exception:
+            pass
+
+    def _on_close_dom(self):
+        self._save_window_geometry()
+        os._exit(0)
+
+    def _filter_params(self):
+        """Filters parameter widgets based on search input."""
+        query = self._search_var.get().lower().strip()
+        for widget in self.param_frame.winfo_children():
+            name = getattr(widget, "_param_name", "").lower()
+            if not query or query in name:
+                widget.grid()
+            else:
+                widget.grid_remove()
 
     def _open_settings(self):
         open_settings_window(self.root)
@@ -1246,6 +1502,8 @@ class DomGUI:
 
     def load_avatar_params(self, avatar_id, params, key=None):
         """Loads avatar parameters for a specific sub."""
+        self._current_avatar_id = avatar_id
+        self._update_preset_dropdown()
         if key:
             self.set_sub_avatar(key, avatar_id, params)
         else:
@@ -1259,7 +1517,9 @@ class DomGUI:
             widget.destroy()
         self.params         = {}
         self.no_params_label = None
-        self.current_avatar  = avatar_id
+        self.current_avatar     = avatar_id
+        self._current_avatar_id = avatar_id
+        self._update_preset_dropdown()
 
         self.avatar_label.config(text=f"Avatar: ...{avatar_id[-8:] if avatar_id else '-'}")
 
@@ -1290,6 +1550,7 @@ class DomGUI:
         col = idx % cols
 
         frame = tk.Frame(self.param_frame, bg="#313244", padx=6, pady=6)
+        frame._param_name = name  # For search filter
         frame.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
         for c in range(cols):
             self.param_frame.columnconfigure(c, weight=1)
@@ -1400,11 +1661,11 @@ class DomGUI:
             entry["var"].set(int(value))
 
     def run(self):
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.mainloop()
 
     def _on_close(self):
         log("GUI closed – shutting down...")
+        self._save_window_geometry()
         self.root.destroy()
         os._exit(0)
 
@@ -1618,7 +1879,7 @@ async def connect_as_sub():
                     dom_count = first.get("dom_count", 0)
                     log(f"[*] Connected – {dom_count} dom(s) online")
                     if sub_gui_instance:
-                        sub_gui_instance.root.after(0, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
+                        sub_gui_instance.root.after(100, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
                 elif first.get("event") == "waiting_for_dom":
                     log("[*] Connected – waiting for dom...")
                     if sub_gui_instance:
@@ -1646,14 +1907,14 @@ async def connect_as_sub():
                         "event":        "avatar_change",
                         "avatar_id":    avatar_id,
                         "params":       params,
-                        "display_name": display_name
+                        "display_name": display_name,
                     })
                     await ws.send(payload)
                     log(f"[*] Current avatar sent: {avatar_id}")
                 else:
                     await ws.send(json.dumps({
                         "event":        "sub_info",
-                        "display_name": display_name
+                        "display_name": display_name,
                     }))
                 disconnected = asyncio.Event()
                 ka_task    = asyncio.ensure_future(keepalive_monitor(ws, "sub", key, disconnected))
@@ -1879,13 +2140,25 @@ class SubGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title(f"VRChat OSC Remote v{CURRENT_VERSION} - Sub")
-        self.root.geometry("500x680")
         self.root.configure(bg="#1e1e2e")
         self.root.resizable(False, False)
 
+        # Fensterposition laden
+        self._win_cfg_path = os.path.join(_BASE_DIR, "window_sub.ini")
+        try:
+            if os.path.exists(self._win_cfg_path):
+                with open(self._win_cfg_path, "r") as f:
+                    geo = f.read().strip()
+                self.root.geometry(geo)
+            else:
+                self.root.geometry("500x680")
+        except Exception:
+            self.root.geometry("500x680")
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_sub)
+
         # Icon
         try:
-            import os, sys
             ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
             if not os.path.exists(ico_path):
                 ico_path = os.path.join(os.path.dirname(sys.executable), "icon.ico")
@@ -1897,7 +2170,6 @@ class SubGUI:
         # Banner
         try:
             from PIL import Image, ImageTk
-            import os, sys
             banner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "banner.png")
             if not os.path.exists(banner_path):
                 banner_path = os.path.join(os.path.dirname(sys.executable), "banner.png")
@@ -1991,7 +2263,7 @@ class SubGUI:
         for line in _log_buffer[-18:]:
             self._append_log(line)
 
-        self.root.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_sub)
 
     def _append_log(self, line):
         self._log_text.config(state="normal")
@@ -2029,8 +2301,16 @@ class SubGUI:
     def _open_settings(self):
         open_settings_window(self.root)
 
+    def _on_close_sub(self):
+        try:
+            with open(self._win_cfg_path, "w") as f:
+                f.write(self.root.geometry())
+        except Exception:
+            pass
+        import os as _os
+        _os._exit(0)
+
     def _open_log_window(self):
-        # Gleiche Log-Fenster Logik wie Dom
         win = tk.Toplevel(self.root)
         win.title("Logs")
         win.geometry("800x500")

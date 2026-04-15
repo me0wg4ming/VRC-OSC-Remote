@@ -7,12 +7,15 @@ A remote control tool for VRChat avatars using OSC protocol. Allows a **Dom** to
 ## Features
 
 - 🎮 **Real-time avatar parameter control** – Toggle Bool/Int parameters remotely
+- 🔍 **Parameter search/filter** – Quickly find parameters by name
+- 💾 **Preset system** – Save and load parameter combinations per avatar
 - 🕹️ **Movement control** – Forward, back, left, right, rotate, jump, spin, run
 - 💬 **Chatbox control** – Send messages to the sub's chatbox
 - 🔄 **Auto-update** – Client updates itself automatically on startup
 - 🔒 **Secure** – Key-based authentication, routed through Cloudflare Tunnel
 - 📋 **Live logs** – Both Dom and Sub have a built-in log viewer
 - ⚙️ **Settings** – Change role and key without reinstalling
+- 💾 **Window position** – Remembers window size and position between sessions
 
 ---
 
@@ -20,9 +23,7 @@ A remote control tool for VRChat avatars using OSC protocol. Allows a **Dom** to
 
 Head to the [Releases](../../releases) page and download the latest `VRChatOSCRemote-Setup.exe`.
 
-> ✅ **0/72 on VirusTotal** – The installer is flagged by no antivirus.
-
-https://www.virustotal.com/gui/file/92fa1bab26175e5b31092c089ee6caebb91df7c682243c82d6cd84c1719df634?nocache=1
+> ✅ **0/72 on VirusTotal** – The installer is signed and clean.
 
 ---
 
@@ -45,7 +46,7 @@ Keys are distributed via our Discord server through a bot:
 2. Go to the `#key-request` channel
 3. Type `/request`
 4. A private ticket channel will be created with your key
-5. Type `/redeem <your-key>` in the ticket channel to activate it
+5. Type `/redeem <key>` in the ticket channel to activate it
 6. Add the key to your client via **⚙ Settings**
 
 ---
@@ -92,6 +93,19 @@ vrchat_osc_path =
 
 ---
 
+## Preset System
+
+The Dom can save parameter combinations as presets per avatar:
+
+1. Connect to a Sub with an avatar loaded
+2. Set the desired parameters
+3. Click **💾 Save** and give the preset a name
+4. Later, select the preset from the dropdown and click **▶ Load**
+
+Presets are stored locally in `presets.json` and are tied to the avatar ID.
+
+---
+
 ## Building from source
 
 ### Requirements
@@ -123,6 +137,7 @@ Make sure OSC is enabled in VRChat:
 - 🔑 Only users with valid keys can connect
 - 🚫 Keys can be revoked at any time by the server admin
 - 📡 All traffic is TLS encrypted
+- 🔐 Server address is obfuscated in the client binary
 
 ---
 
