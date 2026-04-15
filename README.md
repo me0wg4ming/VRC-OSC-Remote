@@ -46,7 +46,7 @@ Keys are distributed via our Discord server through a bot:
 
 1. Join the Discord server: **https://discord.gg/tRmTDESbck**
 2. Go to the `#key-request` channel
-3. Type `/request`
+3. Click **🔑 Request Key** button
 4. A private ticket channel will be created with your key
 5. Type `/redeem <key>` in the ticket channel to activate it
 6. Add the key to your client via **⚙ Settings**
