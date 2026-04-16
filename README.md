@@ -16,6 +16,8 @@ A remote control tool for VRChat avatars using OSC protocol. Allows a **Dom** to
 - 📋 **Live logs** – Both Dom and Sub have a built-in log viewer
 - ⚙️ **Settings** – Change role and key without reinstalling
 - 💾 **Window position** – Remembers window size and position between sessions
+- 🤝 **Permission system** – Doms request access via Discord; Sub approves or denies
+- ☁️ **Server-side lists** – Whitelist and Sub lists are stored server-side, never locally
 
 ---
 
@@ -24,8 +26,6 @@ A remote control tool for VRChat avatars using OSC protocol. Allows a **Dom** to
 Head to the [Releases](../../releases) page and download the latest `VRChatOSCRemote-Setup.exe`.
 
 > ✅ **0/72 on VirusTotal** – The installer is signed and clean.
-
-https://www.virustotal.com/gui/file/4adf3291f13d144ac5a537559067702618ba556c2b1708797595205fda5b084d
 
 ---
 
@@ -53,6 +53,20 @@ Keys are distributed via our Discord server through a bot:
 
 ---
 
+## Connecting Dom to Sub
+
+Once both have keys, the Dom needs permission to connect:
+
+1. Dom uses `/control @Sub` in Discord
+2. A private channel is created where Sub sees an **Accept** or **Deny** button
+3. If Sub accepts, both keys are added to the server-side lists automatically
+4. Dom opens the client – the Sub will appear in their list automatically
+5. Sub opens the client – the Dom will appear in their whitelist automatically
+
+No manual key entry needed after the initial setup key.
+
+---
+
 ## How it works
 
 ```
@@ -64,34 +78,50 @@ Dom PC ──► wss://osc.me0wg4ming.de ◄── Sub PC
 ```
 
 - The **Sub** runs VRChat and the OSC Remote client in sub mode
-- The **Dom** connects using the sub's key to control their avatar
+- The **Dom** connects to the server and is routed to their approved Subs
 - All traffic is routed through Cloudflare – the server IP is never exposed
 - Communication is encrypted via WSS (TLS)
+- Whitelist and Sub lists are stored **server-side only** – the client never saves them locally
 
 ---
 
 ## Configuration
 
-The `config.ini` file is created automatically on first launch. You can also edit it manually:
+The `config.ini` file is created automatically on first launch. It only stores the minimum required settings:
 
 ```ini
 [general]
 role = sub            ; sub or dom
-key = YOUR_KEY_HERE   ; your personal key (sub: one key, dom: comma-separated)
+key = YOUR_KEY_HERE   ; your personal key
 
 [osc]
 send_port = 9000      ; VRChat OSC receive port
 recv_port = 9001      ; VRChat OSC send port
 
 [filter]
-; Parameters starting with these prefixes will NOT be sent to dom
-blacklist_prefix = VF74_, VF73_, ...
 float_throttle_ms = 150
+category_filter = System, FaceTrack, GoGo, OGB, Leash, Other
 
 [paths]
 ; Leave empty for auto-detection
 vrchat_osc_path =
 ```
+
+> Whitelist and Sub Keys are no longer stored in `config.ini` – they are managed server-side.
+
+---
+
+## Discord Commands
+
+| Command | Who | Description |
+|---|---|---|
+| `/control @user` | Dom | Request to control a Sub's avatar |
+| `/allow @user` | Sub | Manually allow a Dom to connect |
+| `/remove @user` | Sub | Remove a Dom from your whitelist |
+| `/whitelist` | Sub | Show your current whitelist |
+| `/mykey` | Anyone | Show your current key |
+| `/redeem <key>` | Anyone | Activate your key in the ticket channel |
+| `/help` | Anyone | Show all commands |
 
 ---
 
@@ -137,9 +167,11 @@ Make sure OSC is enabled in VRChat:
 
 - 🔒 Your server IP is never exposed (Cloudflare Tunnel)
 - 🔑 Only users with valid keys can connect
+- 🤝 Doms must be explicitly approved by the Sub before connecting
 - 🚫 Keys can be revoked at any time by the server admin
 - 📡 All traffic is TLS encrypted
 - 🔐 Server address is obfuscated in the client binary
+- ☁️ Whitelist and Sub lists are stored server-side only – not on your PC
 
 ---
 

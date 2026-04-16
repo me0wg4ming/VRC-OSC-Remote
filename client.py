@@ -12,7 +12,7 @@ import os
 import glob
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.2"
+CURRENT_VERSION = "1.65"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -78,21 +78,11 @@ def _first_run_setup():
         if not key:
             messagebox.showerror("Error", "Please enter your key.", parent=root)
             return
-        # Write config.ini
         cfg = configparser.ConfigParser()
-        cfg["general"] = {
-            "; Sub: single key only\nkey"    : key,
-            "; Dom: multiple keys comma-separated\nkeys": key,
-            "role": role,
-        }
-        cfg["osc"]    = {"send_port": "9000", "recv_port": "9001"}
-        cfg["filter"] = {
-            "; Parameter prefixes that will NOT be sent to dom\nblacklist_prefix": "VF74_, VF73_, VF68_, VF_, VF , OGB/, bOSC/, Leash_, Tail_, grableash, hr_, Go/, M_, Gesture, Viseme, Voice, InStation, Seated, AFK, Upright, Earmuffs, ScaleModified, ScaleFactor, ScaleFactorInverse, EyeHeightAsMeters, EyeHeightAsPercent, VelocityX, VelocityY, VelocityZ, VelocityMagnitude, AngularY, Grounded, TrackingType, VRMode, IsOnFriendsList, IsAnimatorEnabled, PreviewMode, MuteSelf, VFH/, VF1",
-            "; Throttle for float/int updates in milliseconds\nfloat_throttle_ms": "150",
-        }
-        cfg["paths"]  = {
-            "; VRChat OSC config folder (leave empty for auto-detection)\nvrchat_osc_path": ""
-        }
+        cfg["general"] = {"role": role, "key": key}
+        cfg["osc"]     = {"send_port": "9000", "recv_port": "9001"}
+        cfg["filter"]  = {"; Throttle for float/int updates in milliseconds\nfloat_throttle_ms": "150"}
+        cfg["paths"]   = {"; VRChat OSC config folder (leave empty for auto-detection)\nvrchat_osc_path": ""}
         with open(_CONFIG_PATH, "w") as f:
             cfg.write(f)
         result["done"] = True
@@ -117,20 +107,27 @@ if not os.path.exists(_CONFIG_PATH):
 config = configparser.ConfigParser()
 config.read(_CONFIG_PATH)
 
+# Remove legacy local lists – server is now source of truth
+_cfg_dirty = False
+if config.has_section("general"):
+    for _legacy_key in ("whitelist", "dom_keys"):
+        if config.has_option("general", _legacy_key):
+            config.remove_option("general", _legacy_key)
+            _cfg_dirty = True
+if _cfg_dirty:
+    with open(_CONFIG_PATH, "w") as f:
+        config.write(f)
+
 SERVER   = _ep
 ROLE     = config["general"]["role"].lower()
 OSC_PORT = int(config["osc"]["send_port"])
 OSC_RECV = int(config["osc"]["recv_port"])
 
-if ROLE == "dom":
-    raw  = config["general"].get("keys", "")
-    KEYS = [k.strip() for k in raw.split(",") if k.strip()]
-else:
-    KEYS = [config["general"].get("key", "").strip()]
+# Single key for both roles
+KEY  = config["general"].get("key", "").strip()
+KEYS = [KEY]  # Dom sub-keys come from server (domlist_sync), not config
 
 # Filter Config
-raw_bl = config["filter"].get("blacklist_prefix", "") if config.has_section("filter") else ""
-BLACKLIST = [b.strip() for b in raw_bl.split(",") if b.strip()]
 FLOAT_THROTTLE_MS = int(config["filter"].get("float_throttle_ms", 150)) if config.has_section("filter") else 150
 
 # VRChat OSC Path
@@ -179,14 +176,6 @@ def log(msg):
         except Exception:
             pass
 
-# ── Parameter Filter ──────────────────────────────────────────────────────────
-def is_blacklisted(name):
-    for prefix in BLACKLIST:
-        if name.startswith(prefix):
-            return True
-    return False
-
-# ── Auto-Update ───────────────────────────────────────────────────────────────
 _y = bytes([b ^ 0x5A for b in [50,46,46,42,41,96,117,117,47,42,62,59,46,63,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
 _ux = _y
 
@@ -237,6 +226,7 @@ def check_for_updates():
 
     except Exception as e:
         print(f"[!] Update check failed: {e}")
+        log(f"[!] Auto-update unavailable – running v{CURRENT_VERSION} (offline or server unreachable)")
 
 
 import re as _re
@@ -274,76 +264,12 @@ def get_vrchat_display_name():
     except Exception as e:
         log(f"[!] Display name error: {e}")
     return None
-    """Reads the OSCQuery port from the latest VRChat log."""
-    appdata = os.environ.get("APPDATA", "")
-    if not appdata:
-        return None
-    local_low = os.path.join(os.path.dirname(appdata), "LocalLow")
-    log_dir   = os.path.join(local_low, "VRChat", "VRChat")
-    log_files = glob.glob(os.path.join(log_dir, "output_log_*.txt"))
-    if not log_files:
-        return None
-    latest_log = max(log_files, key=os.path.getmtime)
-    try:
-        with open(latest_log, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-        matches = _re.findall(r"Advertising Service .+ of type OSCQuery on (\d+)", content)
-        if matches:
-            port = int(matches[-1])
-            log(f"[*] OSCQuery port: {port}")
-            return port
-    except Exception as e:
-        log(f"[!] Log error: {e}")
-    return None
 
-def get_vrchat_user_id():
-    """Reads VRChat user ID from the latest log."""
-    appdata = os.environ.get("APPDATA", "")
-    if not appdata:
-        return None
-    local_low = os.path.join(os.path.dirname(appdata), "LocalLow")
-    log_dir   = os.path.join(local_low, "VRChat", "VRChat")
-    log_files = glob.glob(os.path.join(log_dir, "output_log_*.txt"))
-    if not log_files:
-        return None
-    latest_log = max(log_files, key=os.path.getmtime)
-    try:
-        with open(latest_log, "r", encoding="utf-8", errors="ignore") as f:
-            for line in reversed(f.readlines()):
-                if "User Authenticated:" in line:
-                    match = _re.search(r"\((usr_[a-f0-9\-]+)\)", line)
-                    if match:
-                        return match.group(1).strip()
-    except Exception as e:
-        log(f"[!] User ID error: {e}")
-    return None
-
-def get_avatar_list():
-    """Reads all avatar JSONs from OSC folder and returns {id: name} dict."""
-    osc_path = find_vrchat_osc_path()
-    user_id  = get_vrchat_user_id()
-    if not osc_path or not user_id:
-        return {}
-    avatar_dir = os.path.join(osc_path, user_id, "Avatars")
-    if not os.path.exists(avatar_dir):
-        return {}
-    avatars = {}
-    for f in glob.glob(os.path.join(avatar_dir, "avtr_*.json")):
-        try:
-            with open(f, "r", encoding="utf-8-sig") as fh:
-                data = json.load(fh)
-            av_id   = data.get("id", "")
-            av_name = data.get("name", av_id)
-            if av_id:
-                avatars[av_id] = av_name
-        except Exception:
-            pass
-    log(f"[*] Avatar list: {len(avatars)} avatars found")
-    return avatars
-
+_last_oscquery_port = None
 
 def get_oscquery_port():
     """Reads the OSCQuery port from the latest VRChat log."""
+    global _last_oscquery_port
     appdata = os.environ.get("APPDATA", "")
     if not appdata:
         return None
@@ -359,7 +285,9 @@ def get_oscquery_port():
         matches = _re.findall(r"Advertising Service .+ of type OSCQuery on (\d+)", content)
         if matches:
             port = int(matches[-1])
-            log(f"[*] OSCQuery port: {port}")
+            if port != _last_oscquery_port:
+                log(f"[*] OSCQuery port: {port}")
+                _last_oscquery_port = port
             return port
     except Exception as e:
         log(f"[!] Log error: {e}")
@@ -375,7 +303,7 @@ def parse_oscquery_node(node, results):
     # Ist ein Parameter mit Typ
     if full_path.startswith("/avatar/parameters/") and ptype_raw:
         name = full_path.replace("/avatar/parameters/", "")
-        if name and not is_blacklisted(name):
+        if name:
             # Wert lesen
             value = None
             val_list = node.get("VALUE")
@@ -462,10 +390,12 @@ def read_avatar_params(avatar_id):
         for p in data.get("parameters", []):
             name  = p.get("name", "")
             ptype = p.get("input", {}).get("type", "").lower()
-            if not name or is_blacklisted(name):
+            if not name:
                 continue
             if ptype == "bool":
                 params.append({"name": name, "type": "bool", "value": False})
+            elif ptype == "int":
+                params.append({"name": name, "type": "int", "value": 0})
         return params
     except Exception as e:
         log(f"[!] Fallback JSON error: {e}")
@@ -549,7 +479,7 @@ def cmd_chatbox(value):
 
 def cmd_avatar(value):
     osc_out.send_message("/avatar/change", value)
-    log(f"[OSC] Avatar gewechselt: {value}")
+    log(f"[OSC] Avatar changed: {value}")
 
 def cmd_drop(value):
     if value in ("right", "both"):
@@ -583,10 +513,11 @@ COMMANDS = {
 }
 
 # ── OSC Listener (Sub) ──────────────────────────────────────────────────────
-osc_params      = {}      # name -> value
-osc_ws_ref      = None
-osc_loop        = None
-float_last_sent = {}      # name -> timestamp (throttle)
+osc_params          = {}      # name -> value
+osc_ws_ref          = None
+osc_loop            = None
+float_last_sent     = {}      # name -> timestamp (throttle)
+_avatar_just_sent   = 0.0     # timestamp of last proactive avatar send
 
 def should_throttle(name, ptype):
     if ptype != "float":
@@ -605,10 +536,6 @@ def osc_param_handler(address, *args):
     name  = address.replace("/avatar/parameters/", "")
     value = args[0] if args else None
     if value is None:
-        return
-
-    # Blacklist prüfen
-    if is_blacklisted(name):
         return
 
     # Nur senden wenn sich der Wert geändert hat
@@ -696,22 +623,31 @@ def start_osc_listener():
             log(f"[!] OSC listener could not be started: {e2}")
 
 # ── GUI (Dom) ──────────────────────────────────────────────────────────────
-def open_settings_window(parent_root):
+def open_settings_window(parent_root, click_x=None, click_y=None):
     """Opens a settings window to change role and key(s), then restarts."""
     import subprocess
 
     win = tk.Toplevel(parent_root)
+    win.withdraw()  # Hide immediately to prevent position flash
     win.title("Settings")
-    win.geometry("420x300")
     win.configure(bg="#1e1e2e")
-    win.resizable(False, False)
+    win.resizable(False, True)
+    win.minsize(420, 260)
     win.grab_set()
+    try:
+        ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+        if not os.path.exists(ico_path):
+            ico_path = os.path.join(os.path.dirname(_sys.executable), "icon.ico")
+        if os.path.exists(ico_path):
+            win.iconbitmap(ico_path)
+    except Exception:
+        pass
 
     tk.Label(win, text="Settings", fg="#cba6f7", bg="#1e1e2e",
              font=("Segoe UI", 12, "bold")).pack(pady=(20, 4))
     tk.Label(win, text="Changes will take effect after restart.",
              fg="#a6adc8", bg="#1e1e2e",
-             font=("Segoe UI", 9)).pack(pady=(0, 16))
+             font=("Segoe UI", 9)).pack(pady=(0, 12))
 
     # Role
     role_frame = tk.Frame(win, bg="#1e1e2e")
@@ -719,35 +655,194 @@ def open_settings_window(parent_root):
     tk.Label(role_frame, text="Role:", fg="#cba6f7", bg="#1e1e2e",
              font=("Segoe UI", 9, "bold"), width=8, anchor="w").pack(side="left")
     role_var = tk.StringVar(value=ROLE)
-    ttk.Combobox(role_frame, textvariable=role_var,
-                 values=["sub", "dom"],
-                 state="readonly", width=20).pack(side="left")
+    role_combo = ttk.Combobox(role_frame, textvariable=role_var,
+                               values=["sub", "dom"], state="readonly", width=20)
+    role_combo.pack(side="left")
 
-    # Key(s)
+    # Key
     key_frame = tk.Frame(win, bg="#1e1e2e")
     key_frame.pack(fill="x", padx=40, pady=4)
-    tk.Label(key_frame, text="Key(s):", fg="#cba6f7", bg="#1e1e2e",
+    tk.Label(key_frame, text="Key:", fg="#cba6f7", bg="#1e1e2e",
              font=("Segoe UI", 9, "bold"), width=8, anchor="w").pack(side="left")
-    key_var = tk.StringVar(value=", ".join(KEYS))
+    cfg_tmp = configparser.ConfigParser()
+    cfg_tmp.read(_CONFIG_PATH)
+    current_key = cfg_tmp["general"].get("key", "") if cfg_tmp.has_section("general") else ""
+    key_var = tk.StringVar(value=current_key)
     tk.Entry(key_frame, textvariable=key_var,
              bg="#313244", fg="#cdd6f4",
              insertbackground="#cdd6f4",
              font=("Segoe UI", 10), relief="flat", width=22).pack(side="left", ipady=3)
 
-    tk.Label(win, text="Dom: comma-separated keys  |  Sub: single key",
-             fg="#a6adc8", bg="#1e1e2e",
-             font=("Segoe UI", 8)).pack()
+    # Dynamic area
+    key_area = tk.Frame(win, bg="#1e1e2e")
+    key_area.pack(fill="x", padx=40, pady=(8, 0))
 
-    def on_save():
-        role = role_var.get().strip().lower()
-        keys = key_var.get().strip()
-        if not keys:
-            return
+    key_rows = []
+
+    def build_key_area():
+        for w in key_area.winfo_children():
+            w.destroy()
+        key_rows.clear()
+
+        if role_var.get() == "dom":
+            win.geometry("420x460")
+            tk.Label(key_area, text="Sub Keys:", fg="#cba6f7", bg="#1e1e2e",
+                     font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x", pady=(0, 2))
+            tk.Label(key_area, text="Keys of the Subs you want to control",
+                     fg="#a6adc8", bg="#1e1e2e",
+                     font=("Segoe UI", 8), anchor="w").pack(fill="x", pady=(0, 4))
+
+            canvas = tk.Canvas(key_area, bg="#1e1e2e", highlightthickness=0, height=120)
+            canvas.pack(fill="both", expand=True)
+            list_frame = tk.Frame(canvas, bg="#1e1e2e")
+            list_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            win_id = canvas.create_window((0, 0), window=list_frame, anchor="nw")
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
+
+            def _scroll(e): canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+            def _bind_r(w):
+                w.bind("<MouseWheel>", _scroll)
+                for c in w.winfo_children(): _bind_r(c)
+            canvas.bind("<MouseWheel>", _scroll)
+
+            def rebuild_list():
+                for w in list_frame.winfo_children(): w.destroy()
+                for i, var in enumerate(key_rows):
+                    row = tk.Frame(list_frame, bg="#313244", pady=2)
+                    row.pack(fill="x", pady=2)
+                    tk.Label(row, text="●", fg="#89b4fa", bg="#313244",
+                             font=("Segoe UI", 6)).pack(side="left", padx=(8, 6))
+                    tk.Entry(row, textvariable=var, bg="#313244", fg="#cdd6f4",
+                             insertbackground="#cdd6f4",
+                             font=("Consolas", 10), relief="flat", bd=0).pack(
+                             side="left", fill="x", expand=True, ipady=3)
+                    def make_remove(i=i):
+                        def remove():
+                            removed_key = key_rows[i].get().strip()
+                            key_rows.pop(i)
+                            rebuild_list()
+                            domlist_send("domlist_remove", removed_key)
+                            # Clean up GUI immediately
+                            if gui_instance:
+                                gui_instance.connected_subs.discard(removed_key)
+                                gui_instance.root.after(0, lambda k=removed_key: gui_instance.clear_avatar(k))
+                                gui_instance.root.after(0, lambda: gui_instance.update_sub_list(
+                                    {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                     for mk in gui_instance.connected_subs}
+                                ))
+                                if not gui_instance.connected_subs:
+                                    gui_instance.root.after(0, lambda: gui_instance.set_server_connected(KEY))
+                            # Close active connection to this sub
+                            if _dom_loop:
+                                async def _close_sub(rk=removed_key):
+                                    for key, ws in list(dom_ws_connections):
+                                        if key == rk:
+                                            try: await ws.close()
+                                            except Exception: pass
+                                asyncio.run_coroutine_threadsafe(_close_sub(), _dom_loop)
+                        return remove
+                    tk.Button(row, text="−", command=make_remove(),
+                              bg="#45475a", fg="#f38ba8",
+                              font=("Segoe UI", 10), relief="flat",
+                              bd=0, padx=6, pady=1, cursor="hand2").pack(side="right", padx=(4, 6))
+                _bind_r(list_frame)
+
+            for k in list(_server_domlist):
+                key_rows.append(tk.StringVar(value=k))
+            rebuild_list()
+
+            add_frame = tk.Frame(key_area, bg="#1e1e2e")
+            add_frame.pack(fill="x", pady=(6, 0))
+            new_key_var = tk.StringVar()
+            tk.Frame(add_frame, bg="#1e1e2e", width=20).pack(side="left")
+            tk.Entry(add_frame, textvariable=new_key_var,
+                     bg="#313244", fg="#cdd6f4",
+                     insertbackground="#cdd6f4",
+                     font=("Consolas", 10), relief="flat").pack(
+                     side="left", fill="x", expand=True, ipady=4, padx=(0, 6))
+
+            def add_key(event=None):
+                val = new_key_var.get().strip()
+                if not val or val in [v.get() for v in key_rows]: return
+                key_rows.append(tk.StringVar(value=val))
+                new_key_var.set("")
+                rebuild_list()
+                domlist_send("domlist_add", val)
+
+            tk.Button(add_frame, text="+", command=add_key,
+                      bg="#313244", fg="#a6e3a1",
+                      font=("Segoe UI", 14), relief="flat",
+                      bd=0, padx=8, cursor="hand2").pack(side="left")
+            win.bind("<Return>", add_key)
+
+        else:
+            # Sub: whitelist
+            win.geometry("420x460")
+            tk.Label(key_area, text="Whitelist:", fg="#cba6f7", bg="#1e1e2e",
+                     font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x", pady=(0, 2))
+            tk.Label(key_area, text="Dom Keys allowed to connect to you",
+                     fg="#a6adc8", bg="#1e1e2e",
+                     font=("Segoe UI", 8), anchor="w").pack(fill="x", pady=(0, 4))
+
+            wl_canvas = tk.Canvas(key_area, bg="#1e1e2e", highlightthickness=0, height=120)
+            wl_canvas.pack(fill="both", expand=True)
+            wl_list_frame = tk.Frame(wl_canvas, bg="#1e1e2e")
+            wl_list_frame.bind("<Configure>", lambda e: wl_canvas.configure(scrollregion=wl_canvas.bbox("all")))
+            wl_win_id = wl_canvas.create_window((0, 0), window=wl_list_frame, anchor="nw")
+            wl_canvas.bind("<Configure>", lambda e: wl_canvas.itemconfig(wl_win_id, width=e.width))
+
+            wl_rows = list(_server_whitelist)
+
+            def wl_rebuild():
+                for w in wl_list_frame.winfo_children(): w.destroy()
+                for key in wl_rows:
+                    row = tk.Frame(wl_list_frame, bg="#313244", pady=2)
+                    row.pack(fill="x", pady=2)
+                    tk.Label(row, text="●", fg="#89b4fa", bg="#313244",
+                             font=("Segoe UI", 6)).pack(side="left", padx=(8, 6))
+                    tk.Label(row, text=key, fg="#cdd6f4", bg="#313244",
+                             font=("Consolas", 10), anchor="w").pack(side="left", fill="x", expand=True)
+                    def make_kick(k=key):
+                        def kick():
+                            wl_rows.remove(k)
+                            wl_rebuild()
+                            whitelist_send("kick", k)
+                        return kick
+                    tk.Button(row, text="✕", command=make_kick(),
+                              bg="#45475a", fg="#f38ba8",
+                              font=("Segoe UI", 10), relief="flat",
+                              bd=0, padx=6, pady=1, cursor="hand2").pack(side="right", padx=(4, 6))
+
+            wl_add_frame = tk.Frame(key_area, bg="#1e1e2e")
+            wl_add_frame.pack(fill="x", pady=(6, 0))
+            wl_new_var = tk.StringVar()
+            tk.Frame(wl_add_frame, bg="#1e1e2e", width=20).pack(side="left")
+            tk.Entry(wl_add_frame, textvariable=wl_new_var,
+                     bg="#313244", fg="#cdd6f4",
+                     insertbackground="#cdd6f4",
+                     font=("Consolas", 10), relief="flat").pack(
+                     side="left", fill="x", expand=True, ipady=4, padx=(0, 6))
+
+            def wl_add(event=None):
+                val = wl_new_var.get().strip()
+                if not val or val in wl_rows: return
+                wl_rows.append(val)
+                wl_new_var.set("")
+                wl_rebuild()
+                whitelist_send("whitelist_add", val)
+
+            tk.Button(wl_add_frame, text="+", command=wl_add,
+                      bg="#313244", fg="#a6e3a1",
+                      font=("Segoe UI", 14), relief="flat",
+                      bd=0, padx=8, cursor="hand2").pack(side="left")
+            win.bind("<Return>", wl_add)
+            wl_rebuild()
+
+    def do_restart():
         cfg = configparser.ConfigParser()
         cfg.read(_CONFIG_PATH)
-        cfg["general"]["role"] = role
-        cfg["general"]["key"]  = keys.split(",")[0].strip()
-        cfg["general"]["keys"] = keys
+        cfg["general"]["role"] = role_var.get().strip().lower()
+        cfg["general"]["key"]  = key_var.get().strip()
         with open(_CONFIG_PATH, "w") as f:
             cfg.write(f)
         python = os.path.join(os.path.dirname(os.path.abspath(_sys.executable)), "pythonw.exe")
@@ -756,13 +851,95 @@ def open_settings_window(parent_root):
         subprocess.Popen([python, os.path.abspath(__file__)])
         os._exit(0)
 
-    tk.Button(win, text="Save & Restart",
+    def on_role_change(*a):
+        build_key_area()
+        new_role = role_var.get().strip().lower()
+        if new_role != ROLE:
+            # Role changed – save and restart immediately
+            key = key_var.get().strip()
+            if not key:
+                return
+            cfg = configparser.ConfigParser()
+            cfg.read(_CONFIG_PATH)
+            cfg["general"]["role"] = new_role
+            cfg["general"]["key"]  = key
+            with open(_CONFIG_PATH, "w") as f:
+                cfg.write(f)
+            do_restart()
+
+    role_var.trace_add("write", on_role_change)
+    build_key_area()
+
+    def on_save():
+        key = key_var.get().strip()
+        if not key: return
+        cfg = configparser.ConfigParser()
+        cfg.read(_CONFIG_PATH)
+        cfg["general"]["role"] = role_var.get().strip().lower()
+        cfg["general"]["key"]  = key
+        with open(_CONFIG_PATH, "w") as f:
+            cfg.write(f)
+        if key != KEY:
+            # Key changed – restart required
+            do_restart()
+        else:
+            win.destroy()
+
+    tk.Button(win, text="Save",
               command=on_save,
               bg="#89b4fa", fg="#1e1e2e",
               activebackground="#74c7ec",
               font=("Segoe UI", 10, "bold"),
-              relief="flat", pady=6, cursor="hand2").pack(pady=20, padx=40, fill="x")
+              relief="flat", pady=6, cursor="hand2").pack(pady=16, padx=40, fill="x")
 
+    # Position near click location (or center on parent as fallback)
+    win.update_idletasks()
+    ww = win.winfo_width()
+    wh = win.winfo_height()
+    sw = win.winfo_screenwidth()
+    sh = win.winfo_screenheight()
+    if click_x is not None and click_y is not None:
+        x = click_x - ww // 2
+        y = click_y - 30  # slightly above the cursor
+    else:
+        px = parent_root.winfo_x()
+        py = parent_root.winfo_y()
+        pw = parent_root.winfo_width()
+        ph = parent_root.winfo_height()
+        x = px + (pw - ww) // 2
+        y = py + (ph - wh) // 2
+    # Keep window fully on screen
+    x = max(0, min(x, sw - ww))
+    y = max(0, min(y, sh - wh))
+    win.geometry(f"+{x}+{y}")
+    win.deiconify()  # Show window now that position is set
+
+
+
+def _set_window_icon(win):
+    """Sets the app icon on a Toplevel window."""
+    try:
+        ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+        if not os.path.exists(ico_path):
+            ico_path = os.path.join(os.path.dirname(_sys.executable), "icon.ico")
+        if os.path.exists(ico_path):
+            win.iconbitmap(ico_path)
+    except Exception:
+        pass
+
+
+def _center_on_parent(win, parent):
+    """Centers a Toplevel window on its parent."""
+    win.update_idletasks()
+    pw = parent.winfo_width()
+    ph = parent.winfo_height()
+    px = parent.winfo_x()
+    py = parent.winfo_y()
+    ww = win.winfo_width()
+    wh = win.winfo_height()
+    x = px + (pw - ww) // 2
+    y = py + (ph - wh) // 2
+    win.geometry(f"+{x}+{y}")
 
 class DomGUI:
     def __init__(self, send_callback):
@@ -794,17 +971,6 @@ class DomGUI:
                 self.root.iconbitmap(icon_path)
         except Exception:
             pass
-
-        # Fenster-Icon setzen
-        try:
-            ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
-            if not os.path.exists(ico_path):
-                ico_path = os.path.join(os.path.dirname(sys.executable), "icon.ico")
-            if os.path.exists(ico_path):
-                self.root.iconbitmap(ico_path)
-        except Exception:
-            pass
-
         self.selected_key = tk.StringVar(value="All")
 
         self._build_ui()
@@ -1074,6 +1240,58 @@ class DomGUI:
                   padx=6, cursor="hand2"
                   ).pack(side="left", padx=(4, 0))
 
+        # Kategorie-Filter
+        cat_frame = tk.Frame(param_outer, bg="#1e1e2e")
+        cat_frame.pack(fill="x", padx=6, pady=(0, 4))
+
+        tk.Label(cat_frame, text="Filter:", bg="#1e1e2e", fg="#a6adc8",
+                 font=("Segoe UI", 8)).pack(side="left", padx=(0, 4))
+
+        # Kategorien: (Label, Prefixes)
+        self._categories = {
+            "System":   ["AFK", "Grounded", "Upright", "InStation", "Seated", "VRMode",
+                         "TrackingType", "MuteSelf", "Voice", "Earmuffs", "IsOnFriendsList",
+                         "IsAnimatorEnabled", "PreviewMode", "VelocityX", "VelocityY",
+                         "VelocityZ", "VelocityMagnitude", "AngularY", "ScaleFactor",
+                         "ScaleFactorInverse", "ScaleModified", "EyeHeightAsMeters",
+                         "EyeHeightAsPercent", "Viseme", "GestureLeft", "GestureRight",
+                         "GestureLeftWeight", "GestureRightWeight"],
+            "FaceTrack": ["VF74_", "VF73_", "VF68_", "VF_", "VFH/", "VF1", "VF "],
+            "GoGo":     ["Go/"],
+            "OGB":      ["OGB/", "bOSC/"],
+            "Leash":    ["Leash_", "Tail_", "grableash"],
+            "Other":    ["hr_", "M_"],
+        }
+        self._cat_vars = {}
+        raw_cats = config["filter"].get("category_filter", "") if config.has_section("filter") else ""
+        active_cats = [x.strip() for x in raw_cats.split(",") if x.strip()]
+        for cat_name in self._categories:
+            var = tk.BooleanVar(value=(cat_name in active_cats))
+            self._cat_vars[cat_name] = var
+            btn = tk.Checkbutton(
+                cat_frame, text=cat_name, variable=var,
+                command=self._save_and_filter,
+                bg="#1e1e2e", fg="#cdd6f4",
+                selectcolor="#313244",
+                activebackground="#1e1e2e",
+                activeforeground="#cdd6f4",
+                font=("Segoe UI", 8), relief="flat",
+                cursor="hand2"
+            )
+            btn.pack(side="left", padx=2)
+
+        # Custom Filter Button
+        tk.Button(cat_frame, text="⚙ Custom",
+                  command=self._open_custom_filter,
+                  bg="#45475a", fg="#cdd6f4",
+                  font=("Segoe UI", 8), relief="flat",
+                  padx=6, cursor="hand2"
+                  ).pack(side="right", padx=4)
+
+        # Custom filters laden aus config
+        raw_custom = config["filter"].get("custom_filter", "") if config.has_section("filter") else ""
+        self._custom_filters = [x.strip() for x in raw_custom.split(",") if x.strip()]
+
         canvas    = tk.Canvas(param_outer, bg="#1e1e2e", highlightthickness=0)
         scrollbar = ttk.Scrollbar(param_outer, orient="vertical", command=canvas.yview)
         self.param_frame = tk.Frame(canvas, bg="#1e1e2e")
@@ -1086,7 +1304,11 @@ class DomGUI:
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+        def _on_param_scroll(e):
+            canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        self._on_param_scroll = _on_param_scroll
+        canvas.bind("<MouseWheel>", _on_param_scroll)
+        self.param_frame.bind("<MouseWheel>", _on_param_scroll)
 
         # param_frame immer so breit wie canvas
         def on_canvas_configure(e):
@@ -1115,23 +1337,7 @@ class DomGUI:
         """Rebuilds the parameter grid with current window width."""
         if not self.params:
             return
-        # All Widgets neu positionieren
-        entries = list(self.params.items())
-        try:
-            w = self.root.winfo_width()
-            cols = max(3, (w - 20) // 180)
-        except:
-            cols = 3
-        for idx, (name, entry) in enumerate(entries):
-            row = idx // cols
-            col = idx % cols
-            # Frame des Widgets neu positionieren
-            widget = entry.get("btn") or entry.get("slider") or entry.get("spinner")
-            if widget:
-                parent = widget.dom
-                parent.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
-            for c in range(cols):
-                self.param_frame.columnconfigure(c, weight=1)
+        self._filter_params()
 
     def _on_sub_select(self, event=None):
         display = self.selected_key.get()
@@ -1161,6 +1367,7 @@ class DomGUI:
                     if ptype not in ("bool", "int"):
                         continue
                     self._add_param_widget(name, ptype, value, len(self.params))
+                self._filter_params()
             else:
                 tk.Label(
                     self.param_frame,
@@ -1201,6 +1408,26 @@ class DomGUI:
         sel_key  = getattr(self, "_display_to_key", {}).get(display, display)
         if sel_key == key or sel_key == "All":
             self.root.after(0, lambda: self._on_sub_select())
+
+    def clear_avatar(self, key=None):
+        """Leert die Avatar-Parameter-Ansicht wenn Sub VRChat verlässt."""
+        if self._current_avatar_id is None:
+            return  # already cleared
+        if key and key in self.sub_data:
+            self.sub_data[key].pop("params", None)
+            self.sub_data[key].pop("avatar_id", None)
+        self.params.clear()
+        self._current_avatar_id = None
+        self.avatar_label.config(text="")
+        self._clear_params()
+        tk.Label(
+            self.param_frame,
+            text="Sub not in VRChat – no avatar available.",
+            fg="#585b70", bg="#1e1e2e",
+            font=("Segoe UI", 10, "italic")
+        ).pack(pady=20)
+        self._update_preset_dropdown()
+        log(f"[*] Avatar UI cleared (sub not in VRChat)")
 
     def _load_presets_file(self) -> dict:
         try:
@@ -1270,7 +1497,11 @@ class DomGUI:
         win.geometry("300x130")
         win.configure(bg="#1e1e2e")
         win.resizable(False, False)
+        win.withdraw()
         win.grab_set()
+        _set_window_icon(win)
+        _center_on_parent(win, self.root)
+        win.deiconify()
 
         tk.Label(win, text="Preset name:", fg="#cba6f7", bg="#1e1e2e",
                  font=("Segoe UI", 9, "bold")).pack(pady=(16, 4))
@@ -1339,24 +1570,176 @@ class DomGUI:
         self._save_window_geometry()
         os._exit(0)
 
+    def _open_custom_filter(self):
+        win = tk.Toplevel(self.root)
+        win.title("Custom Parameter Filters")
+        win.geometry("350x420")
+        win.configure(bg="#1e1e2e")
+        win.resizable(False, False)
+        win.withdraw()
+        win.grab_set()
+        _set_window_icon(win)
+        _center_on_parent(win, self.root)
+        win.deiconify()
+
+        tk.Label(win,
+                 text="Hide parameters whose name starts with the given prefix.",
+                 fg="#a6adc8", bg="#1e1e2e",
+                 font=("Segoe UI", 9)).pack(pady=(12, 6), padx=16)
+
+        list_frame = tk.Frame(win, bg="#1e1e2e")
+        list_frame.pack(padx=16, fill="both", expand=True)
+
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side="right", fill="y")
+
+        listbox = tk.Listbox(list_frame,
+                             bg="#313244", fg="#cdd6f4",
+                             selectbackground="#45475a",
+                             selectforeground="#cdd6f4",
+                             font=("Consolas", 10), relief="flat",
+                             yscrollcommand=scrollbar.set,
+                             activestyle="none", height=10)
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        for f in self._custom_filters:
+            listbox.insert("end", f)
+
+        add_frame = tk.Frame(win, bg="#1e1e2e")
+        add_frame.pack(padx=16, pady=(6, 0), fill="x")
+
+        entry = tk.Entry(add_frame, bg="#313244", fg="#cdd6f4",
+                         insertbackground="#cdd6f4",
+                         font=("Consolas", 10), relief="flat")
+        entry.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 6))
+
+        def add_prefix():
+            val = entry.get().strip()
+            if not val:
+                return
+            existing = list(listbox.get(0, "end"))
+            if val not in existing:
+                listbox.insert("end", val)
+            entry.delete(0, "end")
+
+        def remove_selected():
+            sel = listbox.curselection()
+            for i in reversed(sel):
+                listbox.delete(i)
+
+        entry.bind("<Return>", lambda e: add_prefix())
+
+        tk.Button(add_frame, text="+ Add",
+                  command=add_prefix,
+                  bg="#313244", fg="#cdd6f4",
+                  font=("Segoe UI", 9), relief="flat",
+                  padx=8, pady=3, cursor="hand2"
+                  ).pack(side="left")
+
+        tk.Button(win, text="x Remove Selected",
+                  command=remove_selected,
+                  bg="#45475a", fg="#cdd6f4",
+                  font=("Segoe UI", 9), relief="flat",
+                  pady=4, cursor="hand2"
+                  ).pack(padx=16, pady=(4, 0), fill="x")
+
+        def save():
+            self._custom_filters = list(listbox.get(0, "end"))
+            if not config.has_section("filter"):
+                config.add_section("filter")
+            config["filter"]["custom_filter"] = ", ".join(self._custom_filters)
+            with open(_CONFIG_PATH, "w") as f:
+                config.write(f)
+            self._filter_params()
+            log(f"[*] Custom filters saved: {self._custom_filters}")
+            win.destroy()
+
+        tk.Button(win, text="💾 Save & Apply",
+                  command=save,
+                  bg="#a6e3a1", fg="#1e1e2e",
+                  font=("Segoe UI", 9, "bold"),
+                  relief="flat", pady=6, cursor="hand2"
+                  ).pack(padx=16, pady=8, fill="x")
+
+    def _get_param_category(self, name: str) -> str:
+        """Returns the category name for a parameter."""
+        for cat_name, prefixes in self._categories.items():
+            for prefix in prefixes:
+                if name.startswith(prefix):
+                    return cat_name
+        return None
+
+    def _save_and_filter(self):
+        """Saves category filter state to config, then applies filter."""
+        active = [cat for cat, var in self._cat_vars.items() if var.get()]
+        if not config.has_section("filter"):
+            config.add_section("filter")
+        config["filter"]["category_filter"] = ", ".join(active)
+        with open(_CONFIG_PATH, "w") as f:
+            config.write(f)
+        self._filter_params()
+
     def _filter_params(self):
-        """Filters parameter widgets based on search input."""
-        query = self._search_var.get().lower().strip()
+        """Filters parameter widgets - checked categories are HIDDEN. Re-layouts grid."""
+        query   = self._search_var.get().lower().strip()
+        visible = []
+
         for widget in self.param_frame.winfo_children():
-            name = getattr(widget, "_param_name", "").lower()
-            if not query or query in name:
-                widget.grid()
-            else:
-                widget.grid_remove()
+            name = getattr(widget, "_param_name", "")
+            # Search filter
+            if query and query not in name.lower():
+                widget.grid_forget()
+                continue
+            # Category filter - checked = hidden
+            cat = self._get_param_category(name)
+            if cat and self._cat_vars.get(cat, tk.BooleanVar(value=False)).get():
+                widget.grid_forget()
+                continue
+            # Also check custom filters
+            hidden_by_custom = False
+            for prefix in self._custom_filters:
+                if prefix and name.startswith(prefix):
+                    hidden_by_custom = True
+                    break
+            if hidden_by_custom:
+                widget.grid_forget()
+                continue
+            visible.append(widget)
+
+        # Re-layout visible widgets without gaps
+        try:
+            w    = self.root.winfo_width()
+            cols = max(3, (w - 20) // 180)
+        except Exception:
+            cols = 3
+        for c in range(cols):
+            self.param_frame.columnconfigure(c, weight=1)
+        for idx, widget in enumerate(visible):
+            row = idx // cols
+            col = idx % cols
+            widget.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
 
     def _open_settings(self):
-        open_settings_window(self.root)
+        x = self.root.winfo_pointerx()
+        y = self.root.winfo_pointery()
+        open_settings_window(self.root, click_x=x, click_y=y)
 
     def _open_log_window(self):
         win = tk.Toplevel(self.root)
         win.title("Logs")
-        win.geometry("800x500")
         win.configure(bg="#1e1e2e")
+        win.withdraw()
+        _set_window_icon(win)
+        _log_win_cfg = os.path.join(_BASE_DIR, "window_log_dom.ini")
+        try:
+            if os.path.exists(_log_win_cfg):
+                win.geometry(open(_log_win_cfg).read().strip())
+            else:
+                win.geometry("800x500")
+        except Exception:
+            win.geometry("800x500")
+        win.deiconify()
 
         # Toolbar
         toolbar = tk.Frame(win, bg="#313244", pady=4)
@@ -1443,6 +1826,10 @@ class DomGUI:
 
         # Beim Schließen Callback entfernen
         def on_close():
+            try:
+                open(_log_win_cfg, "w").write(win.geometry())
+            except Exception:
+                pass
             _log_callbacks.remove(append_line)
             win.destroy()
         win.protocol("WM_DELETE_WINDOW", on_close)
@@ -1511,34 +1898,6 @@ class DomGUI:
                 k = dom_ws_connections[0][0]
                 self.set_sub_avatar(k, avatar_id, params)
 
-    def _load_avatar_params_ui(self, avatar_id, params):
-        # Alls leeren
-        for widget in self.param_frame.winfo_children():
-            widget.destroy()
-        self.params         = {}
-        self.no_params_label = None
-        self.current_avatar     = avatar_id
-        self._current_avatar_id = avatar_id
-        self._update_preset_dropdown()
-
-        self.avatar_label.config(text=f"Avatar: ...{avatar_id[-8:] if avatar_id else '-'}")
-
-        if not params:
-            tk.Label(
-                self.param_frame,
-                text="No parameters found for this avatar.",
-                fg="#585b70", bg="#1e1e2e",
-                font=("Segoe UI", 10, "italic")
-            ).pack(pady=20)
-            return
-
-        for i, p in enumerate(params):
-            name  = p["name"]
-            ptype = p["type"]
-            value = p.get("value", None)
-            if ptype not in ("bool", "int"):
-                continue
-            self._add_param_widget(name, ptype, value, len(self.params))
 
     def _add_param_widget(self, name, ptype, value, idx):
         try:
@@ -1552,6 +1911,8 @@ class DomGUI:
         frame = tk.Frame(self.param_frame, bg="#313244", padx=6, pady=6)
         frame._param_name = name  # For search filter
         frame.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+        if hasattr(self, "_on_param_scroll"):
+            frame.bind("<MouseWheel>", self._on_param_scroll)
         for c in range(cols):
             self.param_frame.columnconfigure(c, weight=1)
         frame.columnconfigure(0, weight=1)
@@ -1638,6 +1999,10 @@ class DomGUI:
             entry["spinner"] = spinner
 
         self.params[name] = entry
+        # Bind scroll on all children of this frame
+        if hasattr(self, "_on_param_scroll"):
+            for child in frame.winfo_children():
+                child.bind("<MouseWheel>", self._on_param_scroll)
 
     def update_param(self, name, value, ptype):
         """Live update of a parameter (from OSC)."""
@@ -1663,16 +2028,13 @@ class DomGUI:
     def run(self):
         self.root.mainloop()
 
-    def _on_close(self):
-        log("GUI closed – shutting down...")
-        self._save_window_geometry()
-        self.root.destroy()
-        os._exit(0)
-
 # ── Globale Refs ──────────────────────────────────────────────────────────────
 gui_instance          = None
 dom_ws_connections = []
 _dom_loop          = None
+_idle_ws           = None   # persistent idle connection to server (no target_key)
+_pending_sub_keys  = set()   # sub keys known online before gui was ready
+_pending_sub_names = {}       # key -> display_name
 
 def gui_send_callback(cmd, value):
     if not dom_ws_connections:
@@ -1705,11 +2067,15 @@ async def sub_loop(ws):
                     if sub_gui_instance:
                         sub_gui_instance.root.after(0, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
                         # Refresh name and avatar in case of reconnect
-                        dn = get_vrchat_display_name() or KEYS[0]
+                        dn = get_vrchat_display_name() or KEY
                         sub_gui_instance.root.after(0, lambda n=dn: sub_gui_instance.set_name(n))
                         av_id = sub_gui_instance.var_avatar.get()
                         if av_id and av_id != "-":
                             sub_gui_instance.root.after(0, lambda a=av_id: sub_gui_instance.set_avatar(a))
+                elif e == "whitelist_sync":
+                    wl_keys = data.get("keys", [])
+                    log(f"[*] Whitelist synced: {len(wl_keys)} key(s)")
+                    _save_whitelist_from_server(wl_keys)
                 elif e == "dom_connected":
                     count = data.get('count', '?')
                     log(f"[*] Dom connected! (Total: {count})")
@@ -1725,9 +2091,12 @@ async def sub_loop(ws):
                     if sub_gui_instance:
                         sub_gui_instance.root.after(0, lambda: sub_gui_instance.set_status(False))
                 elif e == "request_avatar":
+                    # Skip if we just sent the avatar proactively (within 3s)
+                    if time.time() - _avatar_just_sent < 3:
+                        continue
                     # Dom fragt nach aktuellem Avatar
                     avatar_id, params = get_current_avatar()
-                    display_name = get_vrchat_display_name() or KEYS[0]
+                    display_name = get_vrchat_display_name() or KEY
                     if avatar_id and osc_ws_ref:
                         if sub_gui_instance:
                             sub_gui_instance.root.after(0, lambda a=avatar_id: sub_gui_instance.set_avatar(a))
@@ -1740,14 +2109,22 @@ async def sub_loop(ws):
                         })
                         await ws.send(payload_out)
                         log(f"[*] Avatar sent on request: {avatar_id}")
+                elif e == "kicked":
+                    reason = data.get("reason", "Kicked by sub")
+                    log(f"[!] Kicked by server: {reason}")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda r=reason: sub_gui_instance.status_label.config(
+                            text=f"● Kicked: {r}", fg="#f38ba8"
+                        ))
+                    return  # close sub_loop, triggers reconnect
                 continue
             cmd = data.get("cmd")
             val = data.get("value", "1")
-            log(f"[<<] Befehl: cmd='{cmd}' value='{val}'")
+            log(f"[<<] Command: cmd='{cmd}' value='{val}'")
             if cmd in COMMANDS:
                 COMMANDS[cmd](val)
             else:
-                log(f"[!] Unbekannter Befehl: '{cmd}'")
+                log(f"[!] Unknown command: '{cmd}'")
         except json.JSONDecodeError:
             log("[!] Ungültige Nachricht")
 
@@ -1782,13 +2159,33 @@ async def dom_loop(connections):
     loop = asyncio.get_event_loop()
 
     # Wenn GUI aktiv ist, kein Terminal-Input – einfach warten bis disconnected
+    # gui_instance könnte noch nicht gesetzt sein (Race zwischen net_thread und GUI-Init)
+    for _ in range(40):
+        if gui_instance:
+            break
+        await asyncio.sleep(0.25)
+
     if gui_instance:
+        # Apply any sub status that was received before gui was ready
+        if _pending_sub_keys:
+            for pk in _pending_sub_keys:
+                gui_instance.connected_subs.add(pk)
+                dn = _pending_sub_names.get(pk)
+                if dn:
+                    gui_instance.sub_data.setdefault(pk, {})["display_name"] = dn
+            gui_instance.root.after(0, lambda: gui_instance.set_status(True, next(iter(_pending_sub_keys))))
+            gui_instance.root.after(100, lambda: gui_instance.update_sub_list(
+                {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                 for mk in gui_instance.connected_subs}
+            ))
+        elif not gui_instance.connected_subs:
+            gui_instance.root.after(0, lambda: gui_instance.set_server_connected(keys[0] if keys else "-"))
         await asyncio.Event().wait()  # Wartet ewig bis Task gecancelt wird
         return
 
     while True:
         try:
-            raw = await loop.run_in_executor(None, lambda: input("Befehl> "))
+            raw = await loop.run_in_executor(None, lambda: input("Command> "))
         except (EOFError, KeyboardInterrupt):
             break
 
@@ -1851,10 +2248,107 @@ async def keepalive_monitor(ws, role, key, disconnected_event):
     except asyncio.CancelledError:
         pass
 
+# ── Whitelist Helpers (Sub) ───────────────────────────────────────────────────
+_server_whitelist: list = []   # RAM-only, never saved to config.ini
+_server_domlist:   list = []   # RAM-only, never saved to config.ini
+
+def _save_whitelist_from_server(wl_keys: list):
+    """Stores whitelist received from server in RAM (not saved to config.ini)."""
+    global _server_whitelist
+    _server_whitelist = wl_keys
+
+def _save_domlist_from_server(dl_keys: list):
+    """Stores domlist received from server in RAM (not saved to config.ini)."""
+    global _server_domlist
+    _server_domlist = dl_keys
+
+def domlist_send(event: str, sub_key: str):
+    """Send domlist_add / domlist_remove to server."""
+    def _do_send():
+        payload = json.dumps({"event": event, "sub_key": sub_key})
+        if _idle_ws:
+            asyncio.run_coroutine_threadsafe(_idle_ws.send(payload), _dom_loop)
+            log(f"[*] Domlist {event}: {sub_key}")
+        elif dom_ws_connections:
+            for _, ws in dom_ws_connections:
+                asyncio.run_coroutine_threadsafe(ws.send(payload), _dom_loop)
+            log(f"[*] Domlist {event}: {sub_key}")
+        else:
+            log(f"[!] No connection available – cannot send {event}")
+
+    if not _dom_loop:
+        log(f"[!] Not connected – cannot send {event}")
+        return
+
+    if _idle_ws or dom_ws_connections:
+        _do_send()
+    else:
+        # Connection not ready yet – retry for up to 5s in background
+        def _retry():
+            for _ in range(10):
+                time.sleep(0.5)
+                if _idle_ws or dom_ws_connections:
+                    _do_send()
+                    return
+            log(f"[!] Timeout – could not send {event} for sub_key: {sub_key}")
+        threading.Thread(target=_retry, daemon=True).start()
+
+
+
+
+def whitelist_send(event: str, dom_key: str):
+    """Send whitelist_add / whitelist_remove / kick to server (sub role)."""
+    if not osc_ws_ref or not osc_loop:
+        log(f"[!] Not connected – cannot send {event}")
+        return
+    payload = json.dumps({"event": event, "dom_key": dom_key})
+    asyncio.run_coroutine_threadsafe(osc_ws_ref.send(payload), osc_loop)
+    log(f"[*] Whitelist {event}: {dom_key}")
+
+
+# ── VRChat Watchdog (Sub) ─────────────────────────────────────────────────────
+def _vrchat_osc_reachable() -> bool:
+    """Returns True if VRChat's OSCQuery HTTP endpoint actually responds."""
+    port = get_oscquery_port()
+    if not port:
+        return False
+    try:
+        url = f"http://127.0.0.1:{port}/avatar"
+        req = urllib.request.Request(url, headers={"Host": "127.0.0.1"})
+        with urllib.request.urlopen(req, timeout=2):
+            return True
+    except Exception:
+        return False
+
+async def watch_vrchat_disconnect(ws):
+    """Sends sub_info to server when VRChat stops running during an active session."""
+    last_alive = _vrchat_osc_reachable()
+    while True:
+        await asyncio.sleep(5)
+        try:
+            alive = _vrchat_osc_reachable()
+            if last_alive and not alive:
+                display_name = get_vrchat_display_name() or KEY
+                log("[*] VRChat no longer reachable – clearing avatar on server")
+                try:
+                    await ws.send(json.dumps({
+                        "event": "sub_info",
+                        "display_name": display_name
+                    }))
+                except Exception:
+                    pass
+                if sub_gui_instance:
+                    sub_gui_instance.root.after(0, lambda: sub_gui_instance.set_avatar(None))
+            last_alive = alive
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            pass
+
 # ── Verbindungen ──────────────────────────────────────────────────────────────
 async def connect_as_sub():
     global osc_ws_ref, osc_loop
-    key    = KEYS[0]
+    key    = KEY
     attempt = 0
 
     t = threading.Thread(target=start_osc_listener, daemon=True)
@@ -1878,60 +2372,42 @@ async def connect_as_sub():
                 if first.get("event") == "state":
                     dom_count = first.get("dom_count", 0)
                     log(f"[*] Connected – {dom_count} dom(s) online")
-                    # Warten bis GUI bereit ist
                     for _ in range(20):
-                        if sub_gui_instance:
-                            break
+                        if sub_gui_instance: break
                         await asyncio.sleep(0.25)
                     if sub_gui_instance:
                         sub_gui_instance.root.after(100, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
-                elif first.get("event") == "waiting_for_dom":
-                    log("[*] Connected – waiting for dom...")
-                    for _ in range(20):
-                        if sub_gui_instance:
-                            break
-                        await asyncio.sleep(0.25)
-                    if sub_gui_instance:
-                        sub_gui_instance.root.after(100, lambda: sub_gui_instance.set_status(False))
-                elif first.get("event") == "dom_connected":
-                    log(f"[*] Connected – dom active!")
-                    count = first.get("count", 1)
-                    for _ in range(20):
-                        if sub_gui_instance:
-                            break
-                        await asyncio.sleep(0.25)
-                    if sub_gui_instance:
-                        sub_gui_instance.root.after(100, lambda c=count: sub_gui_instance.set_status(True, c))
 
                 attempt = 0
 
-                # Display Name ermitteln
-                display_name = get_vrchat_display_name() or KEYS[0]
+                display_name = get_vrchat_display_name() or KEY
                 log(f"[*] Display name: {display_name}")
                 if sub_gui_instance:
                     sub_gui_instance.root.after(0, lambda n=display_name: sub_gui_instance.set_name(n))
 
-                # Aktuellen Avatar sofort senden
+                # Only send avatar if OSCQuery actually responds (VRChat is running)
                 avatar_id, params = get_current_avatar()
+                global _avatar_just_sent
                 if avatar_id:
+                    # get_current_avatar() uses OSCQuery HTTP - if it succeeded, VRChat is live
+                    _avatar_just_sent = time.time()
                     if sub_gui_instance:
                         sub_gui_instance.root.after(0, lambda a=avatar_id: sub_gui_instance.set_avatar(a))
-                    payload = json.dumps({
-                        "event":        "avatar_change",
-                        "avatar_id":    avatar_id,
-                        "params":       params,
-                        "display_name": display_name,
-                    })
-                    await ws.send(payload)
+                    await ws.send(json.dumps({
+                        "event": "avatar_change", "avatar_id": avatar_id,
+                        "params": params, "display_name": display_name,
+                    }))
                     log(f"[*] Current avatar sent: {avatar_id}")
                 else:
-                    await ws.send(json.dumps({
-                        "event":        "sub_info",
-                        "display_name": display_name,
-                    }))
+                    # OSCQuery failed or VRChat not running - send only sub_info, no avatar
+                    _avatar_just_sent = 0.0
+                    log(f"[*] VRChat not reachable via OSCQuery - skipping avatar send")
+                    await ws.send(json.dumps({"event": "sub_info", "display_name": display_name}))
+
                 disconnected = asyncio.Event()
-                ka_task    = asyncio.ensure_future(keepalive_monitor(ws, "sub", key, disconnected))
+                ka_task  = asyncio.ensure_future(keepalive_monitor(ws, "sub", key, disconnected))
                 sub_task = asyncio.ensure_future(sub_loop(ws))
+                vrc_task = asyncio.ensure_future(watch_vrchat_disconnect(ws))
 
                 done, pending = await asyncio.wait(
                     [sub_task, asyncio.ensure_future(disconnected.wait())],
@@ -1939,20 +2415,22 @@ async def connect_as_sub():
                 )
                 for t in pending: t.cancel()
                 ka_task.cancel()
-                log(f"[!] Verbindung zum Server verloren")
+                vrc_task.cancel()
+                log(f"[!] Connection to server lost")
 
         except (websockets.ConnectionClosed, ConnectionRefusedError, OSError) as e:
-            log(f"[!] Verbindung fehlgeschlagen: {e}")
+            log(f"[!] Connection failed: {e}")
         except Exception as e:
             log(f"[!] Error: {e}")
 
         osc_ws_ref = None
-        log(f"    Reconnect in {RECONNECT_DELAY}s...")
+        log(f"    Reconnecting in {RECONNECT_DELAY}s...")
         await asyncio.sleep(RECONNECT_DELAY)
 
 async def connect_as_dom():
-    global gui_instance
-    attempt = 0
+    global gui_instance, _idle_ws
+    attempt  = 0
+    idle_task = None
 
     while True:
         attempt += 1
@@ -1961,21 +2439,81 @@ async def connect_as_dom():
             ka_tasks     = []
             disconnected = asyncio.Event()
 
-            for key in KEYS:
-                log(f"Connecting as MASTER | Key: {key} | Attempt #{attempt}")
+            # Always establish persistent idle connection if not already alive
+            if not _idle_ws or (idle_task and idle_task.done()):
+                try:
+                    _idle_ws = await websockets.connect(SERVER)
+                    await _idle_ws.send(json.dumps({"key": KEY, "role": "dom"}))
+                    resp = json.loads(await _idle_ws.recv())
+                    if resp.get("event") == "domlist_sync":
+                        dl_keys = resp.get("keys", [])
+                        _save_domlist_from_server(dl_keys)
+                        log(f"[*] Idle connected | Domlist: {len(dl_keys)} key(s)")
+                        effective_keys = dl_keys
+                    else:
+                        effective_keys = []
+                except Exception as e:
+                    log(f"[!] Idle connection failed: {e}")
+                    _idle_ws = None
+                    effective_keys = []
+
+                # Start listener for idle connection
+                async def idle_listen():
+                    global _idle_ws
+                    try:
+                        async for msg in _idle_ws:
+                            data = json.loads(msg)
+                            if data.get("event") == "domlist_sync":
+                                dl_keys = data.get("keys", [])
+                                log(f"[*] Domlist synced: {len(dl_keys)} key(s)")
+                                _save_domlist_from_server(dl_keys)
+                    except Exception:
+                        pass
+                    finally:
+                        _idle_ws = None
+
+                async def idle_keepalive():
+                    while _idle_ws:
+                        await asyncio.sleep(8)
+                        try:
+                            if _idle_ws:
+                                pong = await asyncio.wait_for(_idle_ws.ping(), timeout=4)
+                                await pong
+                        except Exception:
+                            break
+
+                idle_task = asyncio.ensure_future(idle_listen()) if _idle_ws else None
+                if _idle_ws:
+                    asyncio.ensure_future(idle_keepalive())
+            else:
+                # Idle still alive – just read current domlist from RAM
+                effective_keys = list(_server_domlist)
+                idle_task = None
+
+            for key in effective_keys:
+                log(f"Connecting as MASTER | Key: {KEY} | Target: {key} | Attempt #{attempt}")
                 ws = await websockets.connect(SERVER)
-                await ws.send(json.dumps({"key": key, "role": "dom"}))
+                await ws.send(json.dumps({"key": KEY, "target_key": key, "role": "dom"}))
                 first = json.loads(await ws.recv())
 
                 if "error" in first:
-                    log(f"[!] Key '{key}' abgelehnt: {first['error']}")
+                    err_msg = first['error']
+                    log(f"[!] Key '{key}' rejected: {err_msg}")
                     await ws.close()
+                    if err_msg == "Already connected":
+                        # Connection still alive from previous iteration – wait for it to drop
+                        log(f"[*] Waiting for previous connection to close before retrying...")
+                        await asyncio.sleep(RECONNECT_DELAY)
                     continue
 
                 if first.get("event") == "state":
                     sub_online = first.get("sub_online", False)
                     dn           = first.get("display_name")
                     log(f"[*] State: sub_online={sub_online} | Key: {key}")
+                    if sub_online:
+                        _pending_sub_keys.add(key)
+                        if dn and dn != key:
+                            _pending_sub_names[key] = dn
                     if gui_instance:
                         if sub_online:
                             gui_instance.set_status(True, key)
@@ -2012,7 +2550,9 @@ async def connect_as_dom():
                 ))
 
             if not connections:
-                log(f"[!] No connections – retry in {RECONNECT_DELAY}s...")
+                log(f"[*] No subs in domlist yet – idle connected, waiting...")
+                if gui_instance:
+                    gui_instance.root.after(0, lambda: gui_instance.set_server_connected(KEY))
                 await asyncio.sleep(RECONNECT_DELAY)
                 continue
 
@@ -2043,6 +2583,7 @@ async def connect_as_dom():
                                     gui_instance.connected_subs.discard(key)
                                     if not gui_instance.connected_subs:
                                         gui_instance.set_server_connected(key)
+                                    gui_instance.root.after(0, lambda k=key: gui_instance.clear_avatar(k))
                                     gui_instance.root.after(0, lambda k=key: gui_instance.update_sub_list(
                                         {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
                                          for mk in gui_instance.connected_subs}
@@ -2066,6 +2607,7 @@ async def connect_as_dom():
                             if gui_instance:
                                 gui_instance.connected_subs.discard(key)
                                 gui_instance.set_status(False)
+                                gui_instance.root.after(0, lambda k=key: gui_instance.clear_avatar(k))
                                 gui_instance.root.after(0, lambda k=key: gui_instance.update_sub_list(
                                     {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
                                      for mk in gui_instance.connected_subs}
@@ -2090,6 +2632,11 @@ async def connect_as_dom():
 
                         elif e == "sub_info" and gui_instance:
                             display_name = data.get("display_name")
+                            # Avatar-Daten sofort leeren, bevor update_sub_list
+                            # _on_sub_select triggert und alten Cache anzeigt
+                            if key in gui_instance.sub_data:
+                                gui_instance.sub_data[key].pop("avatar_id", None)
+                                gui_instance.sub_data[key].pop("params", None)
                             if display_name and display_name != key:
                                 gui_instance.connected_subs.add(key)
                                 def _update_info(k=key, n=display_name):
@@ -2099,6 +2646,8 @@ async def connect_as_dom():
                                          for mk in gui_instance.connected_subs}
                                     )
                                 gui_instance.root.after(0, _update_info)
+                            # VRChat nicht mehr aktiv – Avatar leeren
+                            gui_instance.root.after(0, lambda k=key: gui_instance.clear_avatar(k))
 
                         elif e == "param_update" and gui_instance:
                             gui_instance.update_param(
@@ -2109,6 +2658,24 @@ async def connect_as_dom():
 
                         elif e == "no_sub":
                             pass  # Kein Sub für diesen Key – still ignorieren
+
+                        elif e == "kicked":
+                            reason = data.get("reason", "Kicked by sub")
+                            log(f"[!] Kicked from sub {key}: {reason}")
+                            if gui_instance:
+                                gui_instance.connected_subs.discard(key)
+                                gui_instance.root.after(0, lambda k=key: gui_instance.clear_avatar(k))
+                                gui_instance.root.after(0, lambda: gui_instance.update_sub_list(
+                                    {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                     for mk in gui_instance.connected_subs}
+                                ))
+                                if not gui_instance.connected_subs:
+                                    gui_instance.root.after(0, lambda: gui_instance.set_server_connected(KEY))
+
+                        elif e == "domlist_sync":
+                            dl_keys = data.get("keys", [])
+                            log(f"[*] Domlist synced: {len(dl_keys)} key(s)")
+                            _save_domlist_from_server(dl_keys)
 
                 except Exception:
                     disconnected.set()
@@ -2122,7 +2689,7 @@ async def connect_as_dom():
             )
 
             if disconnected.is_set():
-                log("[!] Verbindung verloren – Reconnect...")
+                log("[!] Connection lost – reconnecting...")
                 if gui_instance:
                     gui_instance.set_status(False)
 
@@ -2131,13 +2698,16 @@ async def connect_as_dom():
             for _, ws in connections:
                 try: await ws.close()
                 except Exception: pass
+            # Give server time to clean up stale connections before reconnecting
+            await asyncio.sleep(1.5)
+            # idle_task and _idle_ws stay alive for next iteration
 
         except (websockets.ConnectionClosed, ConnectionRefusedError, OSError) as e:
-            log(f"[!] Verbindung fehlgeschlagen: {e}")
+            log(f"[!] Connection failed: {e}")
         except Exception as e:
             log(f"[!] Error: {e}")
 
-        log(f"    Reconnect in {RECONNECT_DELAY}s...")
+        log(f"    Reconnecting in {RECONNECT_DELAY}s...")
         await asyncio.sleep(RECONNECT_DELAY)
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -2168,7 +2738,6 @@ class SubGUI:
         except Exception:
             self.root.geometry("500x680")
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close_sub)
 
         # Icon
         try:
@@ -2237,19 +2806,18 @@ class SubGUI:
             tk.Label(row, textvariable=value_var, fg="#cdd6f4", bg="#1e1e2e",
                      font=("Segoe UI", 9), anchor="w").pack(side="left")
 
-        self.var_key     = tk.StringVar(value=KEYS[0])
-        self.var_name    = tk.StringVar(value="-")
-        self.var_avatar  = tk.StringVar(value="-")
-        self.var_dom  = tk.StringVar(value="Waiting...")
-        self.var_port    = tk.StringVar(value=str(OSC_RECV))
+        self.var_key    = tk.StringVar(value=KEY)
+        self.var_name   = tk.StringVar(value="-")
+        self.var_avatar = tk.StringVar(value="-")
+        self.var_dom    = tk.StringVar(value="Waiting...")
+        self.var_port   = tk.StringVar(value=str(OSC_RECV))
 
-        info_row("Key:",        self.var_key)
-        info_row("Name:",       self.var_name)
-        info_row("Avatar:",     self.var_avatar)
-        info_row("Dom:",     self.var_dom)
-        info_row("OSC Port:",   self.var_port)
+        info_row("Key:",      self.var_key)
+        info_row("Name:",     self.var_name)
+        info_row("Avatar:",   self.var_avatar)
+        info_row("Dom:",      self.var_dom)
+        info_row("OSC Port:", self.var_port)
 
-        # Log preview (letzte 8 Zeilen)
         log_frame = tk.LabelFrame(
             self.root, text=" Recent Logs ",
             fg="#cba6f7", bg="#1e1e2e",
@@ -2312,7 +2880,9 @@ class SubGUI:
         self.var_name.set(name or "-")
 
     def _open_settings(self):
-        open_settings_window(self.root)
+        x = self.root.winfo_pointerx()
+        y = self.root.winfo_pointery()
+        open_settings_window(self.root, click_x=x, click_y=y)
 
     def _on_close_sub(self):
         try:
@@ -2326,8 +2896,18 @@ class SubGUI:
     def _open_log_window(self):
         win = tk.Toplevel(self.root)
         win.title("Logs")
-        win.geometry("800x500")
         win.configure(bg="#1e1e2e")
+        win.withdraw()
+        _set_window_icon(win)
+        _log_win_cfg = os.path.join(_BASE_DIR, "window_log_sub.ini")
+        try:
+            if os.path.exists(_log_win_cfg):
+                win.geometry(open(_log_win_cfg).read().strip())
+            else:
+                win.geometry("800x500")
+        except Exception:
+            win.geometry("800x500")
+        win.deiconify()
         toolbar = tk.Frame(win, bg="#313244", pady=4)
         toolbar.pack(fill="x")
         frame = tk.Frame(win, bg="#1e1e2e")
@@ -2342,6 +2922,20 @@ class SubGUI:
         text.tag_config("error",   foreground="#f38ba8")
         text.tag_config("success", foreground="#a6e3a1")
         text.tag_config("info",    foreground="#89b4fa")
+        tk.Button(
+            toolbar, text="Clear",
+            command=lambda: (text.config(state="normal"), text.delete("1.0", "end"), text.config(state="disabled")),
+            bg="#45475a", fg="#cdd6f4",
+            font=("Segoe UI", 9), relief="flat", padx=8, cursor="hand2"
+        ).pack(side="left", padx=6)
+
+        tk.Button(
+            toolbar, text="Copy all",
+            command=lambda: (win.clipboard_clear(), win.clipboard_append(text.get("1.0", "end"))),
+            bg="#45475a", fg="#cdd6f4",
+            font=("Segoe UI", 9), relief="flat", padx=8, cursor="hand2"
+        ).pack(side="left", padx=2)
+
         auto_scroll = tk.BooleanVar(value=True)
         tk.Checkbutton(toolbar, text="Auto-scroll", variable=auto_scroll,
                        bg="#313244", fg="#cdd6f4", selectcolor="#45475a",
@@ -2361,7 +2955,15 @@ class SubGUI:
         text.see("end")
         text.config(state="disabled")
         _log_callbacks.append(append_line)
-        win.protocol("WM_DELETE_WINDOW", lambda: (_log_callbacks.remove(append_line), win.destroy()))
+
+        def on_close_sub_log():
+            try:
+                open(_log_win_cfg, "w").write(win.geometry())
+            except Exception:
+                pass
+            _log_callbacks.remove(append_line)
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", on_close_sub_log)
 
     def run(self):
         self.root.mainloop()
@@ -2377,7 +2979,9 @@ def main():
     print("=" * 50)
     log(f"Role:   {ROLE.upper()}")
     log(f"Server: {SERVER}")
-    log(f"Keys:   {', '.join(KEYS)}")
+    log(f"Key:    {KEY}")
+    if ROLE == "dom":
+        log(f"Targets: {', '.join(KEYS)}")
     log(f"OSC ->  127.0.0.1:{OSC_PORT}")
     if ROLE == "sub":
         osc_path = find_vrchat_osc_path()
