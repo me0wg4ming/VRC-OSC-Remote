@@ -27,6 +27,8 @@ Head to the [Releases](../../releases) page and download the latest `VRChatOSCRe
 
 > ✅ **0/72 on VirusTotal** – The installer is signed and clean.
 
+https://www.virustotal.com/gui/file/d87b67660797594dd604bf10c55417c8d8562a5c24905cd03b5fc159967e79c5
+
 ---
 
 ## Installation
