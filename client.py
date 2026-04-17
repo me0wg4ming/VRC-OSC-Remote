@@ -12,7 +12,7 @@ import os
 import glob
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.65"
+CURRENT_VERSION = "1.78"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -232,24 +232,42 @@ def check_for_updates():
 import re as _re
 import urllib.request
 
-def find_vrchat_osc_path():
-    if VRCHAT_OSC_PATH:
-        return VRCHAT_OSC_PATH
+def _get_vrchat_local_low() -> str | None:
+    """Returns the VRChat LocalLow path for Windows or Linux (Proton)."""
+    # Windows
     appdata = os.environ.get("APPDATA", "")
     if appdata:
         local_low = os.path.join(os.path.dirname(appdata), "LocalLow")
-        path = os.path.join(local_low, "VRChat", "VRChat", "OSC")
+        path = os.path.join(local_low, "VRChat", "VRChat")
+        if os.path.exists(path):
+            return path
+    # Linux – Proton/Steam
+    home = os.path.expanduser("~")
+    steam_paths = [
+        os.path.join(home, ".steam", "debian-installation", "steamapps", "compatdata", "438100", "pfx", "drive_c", "users", "steamuser", "AppData", "LocalLow", "VRChat", "VRChat"),
+        os.path.join(home, ".steam", "steam", "steamapps", "compatdata", "438100", "pfx", "drive_c", "users", "steamuser", "AppData", "LocalLow", "VRChat", "VRChat"),
+        os.path.join(home, ".local", "share", "Steam", "steamapps", "compatdata", "438100", "pfx", "drive_c", "users", "steamuser", "AppData", "LocalLow", "VRChat", "VRChat"),
+    ]
+    for p in steam_paths:
+        if os.path.exists(p):
+            return p
+    return None
+
+def find_vrchat_osc_path():
+    if VRCHAT_OSC_PATH:
+        return VRCHAT_OSC_PATH
+    base = _get_vrchat_local_low()
+    if base:
+        path = os.path.join(base, "OSC")
         if os.path.exists(path):
             return path
     return None
 
 def get_vrchat_display_name():
     """Reads VRChat display name from the latest log."""
-    appdata = os.environ.get("APPDATA", "")
-    if not appdata:
+    log_dir = _get_vrchat_local_low()
+    if not log_dir:
         return None
-    local_low = os.path.join(os.path.dirname(appdata), "LocalLow")
-    log_dir   = os.path.join(local_low, "VRChat", "VRChat")
     log_files = glob.glob(os.path.join(log_dir, "output_log_*.txt"))
     if not log_files:
         return None
@@ -270,11 +288,9 @@ _last_oscquery_port = None
 def get_oscquery_port():
     """Reads the OSCQuery port from the latest VRChat log."""
     global _last_oscquery_port
-    appdata = os.environ.get("APPDATA", "")
-    if not appdata:
+    log_dir = _get_vrchat_local_low()
+    if not log_dir:
         return None
-    local_low = os.path.join(os.path.dirname(appdata), "LocalLow")
-    log_dir   = os.path.join(local_low, "VRChat", "VRChat")
     log_files = glob.glob(os.path.join(log_dir, "output_log_*.txt"))
     if not log_files:
         return None
@@ -1344,6 +1360,7 @@ class DomGUI:
         key = getattr(self, "_display_to_key", {}).get(display, display)
 
         if key == "All":
+            self._update_preset_dropdown()
             self.avatar_label.config(text="")
             self._clear_params()
             tk.Label(
@@ -1356,8 +1373,13 @@ class DomGUI:
             data      = self.sub_data.get(key, {})
             avatar_id = data.get("avatar_id")
             params    = data.get("params", [])
+            # Always reset avatar_id for this sub – don't carry over from previous sub
+            self._current_avatar_id = avatar_id if avatar_id else None
             if avatar_id:
                 self.avatar_label.config(text=f"Avatar: ...{avatar_id[-8:]}")
+            else:
+                self.avatar_label.config(text="")
+            self._update_preset_dropdown()
             self._clear_params()
             if params:
                 for i, p in enumerate(params):
@@ -1403,10 +1425,10 @@ class DomGUI:
         self.sub_data.setdefault(key, {})
         self.sub_data[key]["avatar_id"] = avatar_id
         self.sub_data[key]["params"]    = params
-        # GUI updaten wenn dieser Sub gerade ausgewählt ist
+        # GUI updaten nur wenn dieser spezifische Sub ausgewählt ist – nicht bei "All"
         display  = self.selected_key.get()
         sel_key  = getattr(self, "_display_to_key", {}).get(display, display)
-        if sel_key == key or sel_key == "All":
+        if sel_key == key:
             self.root.after(0, lambda: self._on_sub_select())
 
     def clear_avatar(self, key=None):
@@ -1452,6 +1474,14 @@ class DomGUI:
             self._preset_var.set("")
             self._preset_dropdown.set("")
             return
+        # Don't show presets if "All" is selected
+        display = self.selected_key.get()
+        sel_key = getattr(self, "_display_to_key", {}).get(display, display)
+        if sel_key == "All":
+            self._preset_dropdown["values"] = []
+            self._preset_var.set("")
+            self._preset_dropdown.set("")
+            return
         names = list(self._presets[avatar_id].keys())
         self._preset_dropdown["values"] = names
         self._preset_var.set(names[0])
@@ -1461,12 +1491,23 @@ class DomGUI:
         av_id    = self._current_avatar_id
         if not name or not av_id:
             return
+        # Don't load preset if "All" is selected – ambiguous which sub to target
+        display = self.selected_key.get()
+        sel_key = getattr(self, "_display_to_key", {}).get(display, display)
+        if sel_key == "All":
+            from tkinter import messagebox
+            messagebox.showinfo("Presets", "Please select a specific sub before loading a preset.", parent=self.root)
+            return
         preset = self._presets.get(av_id, {}).get(name)
         if not preset:
             return
-        # Apply all parameter values
+        # Apply all parameter values – send actual value, not just bool cast
         for param_name, value in preset.items():
-            self.send_cmd("avatar_param", f"{param_name}:{1 if value else 0}")
+            if isinstance(value, bool):
+                send_val = 1 if value else 0
+            else:
+                send_val = int(value)
+            self.send_cmd("avatar_param", f"{param_name}:{send_val}")
             # Update button state in GUI
             if param_name in self.params:
                 entry = self.params[param_name]
@@ -1876,8 +1917,9 @@ class DomGUI:
 
     def set_status(self, connected, sub_key=None):
         if connected:
+            count = len(self.connected_subs) if self.connected_subs else 1
             self.status_label.config(text="● Connected", fg="#a6e3a1")
-            self.sub_label.config(text=f"Sub: {sub_key or '-'}")
+            self.sub_label.config(text=f"Sub: {count} sub(s)")
         else:
             self.status_label.config(text="● Waiting for sub...", fg="#fab387")
             self.sub_label.config(text="Sub: -")
@@ -2056,6 +2098,7 @@ def gui_send_callback(cmd, value):
 
 # ── Sub Loop ────────────────────────────────────────────────────────────────
 async def sub_loop(ws):
+    _last_dom_count = -1
     async for message in ws:
         try:
             data = json.loads(message)
@@ -2063,7 +2106,9 @@ async def sub_loop(ws):
                 e = data["event"]
                 if e == "state":
                     dom_count = data.get("dom_count", 0)
-                    log(f"[*] State update: {dom_count} dom(s)")
+                    if dom_count != _last_dom_count:
+                        log(f"[*] State update: {dom_count} dom(s)")
+                        _last_dom_count = dom_count
                     if sub_gui_instance:
                         sub_gui_instance.root.after(0, lambda c=dom_count: sub_gui_instance.set_status(c > 0, c))
                         # Refresh name and avatar in case of reconnect
@@ -2350,6 +2395,7 @@ async def connect_as_sub():
     global osc_ws_ref, osc_loop
     key    = KEY
     attempt = 0
+    invalid_key_count = 0
 
     t = threading.Thread(target=start_osc_listener, daemon=True)
     t.start()
@@ -2365,9 +2411,22 @@ async def connect_as_sub():
                 first = json.loads(await ws.recv())
 
                 if "error" in first:
-                    log(f"[!] Server: {first['error']}")
+                    err = first['error']
+                    log(f"[!] Server: {err}")
+                    if "Invalid" in err or "Unknown" in err:
+                        invalid_key_count += 1
+                        log(f"[!] Invalid key attempt {invalid_key_count}/3")
+                        if invalid_key_count >= 3:
+                            log(f"[!] Key rejected 3 times – opening settings")
+                            if sub_gui_instance:
+                                sub_gui_instance.root.after(0, lambda: open_settings_window(sub_gui_instance.root))
+                            else:
+                                import sys as _sys2
+                                _sys2.exit(1)
+                            return
                     await asyncio.sleep(RECONNECT_DELAY)
                     continue
+                invalid_key_count = 0  # reset on successful connect
 
                 if first.get("event") == "state":
                     dom_count = first.get("dom_count", 0)
@@ -2431,6 +2490,7 @@ async def connect_as_dom():
     global gui_instance, _idle_ws
     attempt  = 0
     idle_task = None
+    invalid_key_count = 0
 
     while True:
         attempt += 1
@@ -2445,11 +2505,25 @@ async def connect_as_dom():
                     _idle_ws = await websockets.connect(SERVER)
                     await _idle_ws.send(json.dumps({"key": KEY, "role": "dom"}))
                     resp = json.loads(await _idle_ws.recv())
-                    if resp.get("event") == "domlist_sync":
+                    if "error" in resp:
+                        err = resp["error"]
+                        log(f"[!] Idle connect rejected: {err}")
+                        if "Invalid" in err:
+                            invalid_key_count += 1
+                            log(f"[!] Invalid key attempt {invalid_key_count}/3")
+                            if invalid_key_count >= 3:
+                                log(f"[!] Key rejected 3 times – opening settings")
+                                if gui_instance:
+                                    gui_instance.root.after(0, lambda: open_settings_window(gui_instance.root))
+                                return
+                        _idle_ws = None
+                        effective_keys = []
+                    elif resp.get("event") == "domlist_sync":
                         dl_keys = resp.get("keys", [])
                         _save_domlist_from_server(dl_keys)
                         log(f"[*] Idle connected | Domlist: {len(dl_keys)} key(s)")
                         effective_keys = dl_keys
+                        invalid_key_count = 0
                     else:
                         effective_keys = []
                 except Exception as e:
@@ -2488,7 +2562,6 @@ async def connect_as_dom():
             else:
                 # Idle still alive – just read current domlist from RAM
                 effective_keys = list(_server_domlist)
-                idle_task = None
 
             for key in effective_keys:
                 log(f"Connecting as MASTER | Key: {KEY} | Target: {key} | Attempt #{attempt}")
@@ -2500,11 +2573,19 @@ async def connect_as_dom():
                     err_msg = first['error']
                     log(f"[!] Key '{key}' rejected: {err_msg}")
                     await ws.close()
-                    if err_msg == "Already connected":
-                        # Connection still alive from previous iteration – wait for it to drop
+                    if err_msg == "Invalid key" or "Invalid" in err_msg:
+                        invalid_key_count += 1
+                        log(f"[!] Invalid key attempt {invalid_key_count}/3")
+                        if invalid_key_count >= 3:
+                            log(f"[!] Key rejected 3 times – opening settings")
+                            if gui_instance:
+                                gui_instance.root.after(0, lambda: open_settings_window(gui_instance.root))
+                            return
+                    elif err_msg == "Already connected":
                         log(f"[*] Waiting for previous connection to close before retrying...")
                         await asyncio.sleep(RECONNECT_DELAY)
                     continue
+                invalid_key_count = 0  # reset on successful connect
 
                 if first.get("event") == "state":
                     sub_online = first.get("sub_online", False)
@@ -2571,14 +2652,14 @@ async def connect_as_dom():
                             dn           = data.get("display_name")
                             if gui_instance:
                                 if sub_online:
+                                    gui_instance.connected_subs.add(key)
                                     gui_instance.set_status(True, key)
                                     if dn and dn != key:
-                                        gui_instance.connected_subs.add(key)
                                         gui_instance.sub_data.setdefault(key, {})["display_name"] = dn
-                                        gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_sub_list(
-                                            {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
-                                             for mk in gui_instance.connected_subs}
-                                        ))
+                                    gui_instance.root.after(100, lambda k=key: gui_instance.update_sub_list(
+                                        {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                         for mk in gui_instance.connected_subs}
+                                    ))
                                 else:
                                     gui_instance.connected_subs.discard(key)
                                     if not gui_instance.connected_subs:
@@ -2592,21 +2673,26 @@ async def connect_as_dom():
                         elif e == "sub_connected":
                             log(f"[*] Sub connected | Key: {key}")
                             if gui_instance:
+                                gui_instance.connected_subs.add(key)
                                 gui_instance.set_status(True, key)
                                 dn = data.get("display_name")
                                 if dn and dn != key:
-                                    gui_instance.connected_subs.add(key)
                                     gui_instance.sub_data.setdefault(key, {})["display_name"] = dn
-                                    gui_instance.root.after(100, lambda k=key, n=dn: gui_instance.update_sub_list(
-                                        {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
-                                         for mk in gui_instance.connected_subs}
-                                    ))
+                                gui_instance.root.after(100, lambda k=key: gui_instance.update_sub_list(
+                                    {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
+                                     for mk in gui_instance.connected_subs}
+                                ))
 
                         elif e == "sub_disconnected":
                             log(f"[!] Sub disconnected | Key: {key}")
                             if gui_instance:
                                 gui_instance.connected_subs.discard(key)
-                                gui_instance.set_status(False)
+                                if gui_instance.connected_subs:
+                                    # Still have other subs connected
+                                    remaining = next(iter(gui_instance.connected_subs))
+                                    gui_instance.set_status(True, remaining)
+                                else:
+                                    gui_instance.set_status(False)
                                 gui_instance.root.after(0, lambda k=key: gui_instance.clear_avatar(k))
                                 gui_instance.root.after(0, lambda k=key: gui_instance.update_sub_list(
                                     {mk: gui_instance.sub_data.get(mk, {}).get("display_name", mk)
