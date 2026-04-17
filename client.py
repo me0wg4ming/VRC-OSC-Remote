@@ -10,9 +10,17 @@ from datetime import datetime
 from pythonosc import udp_client, dispatcher, osc_server
 import os
 import glob
+import hashlib as _hashlib
+
+def _get_self_hash() -> str:
+    try:
+        with open(os.path.abspath(__file__), "rb") as f:
+            return _hashlib.sha256(f.read()).hexdigest()
+    except Exception:
+        return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.78"
+CURRENT_VERSION = "1.82"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -184,14 +192,21 @@ def check_for_updates():
     try:
         import urllib.request
         import subprocess
+        import hashlib
 
-        url     = f"{_ux}/version"
-        req     = urllib.request.Request(url, headers={"User-Agent": "VRChatOSCRemote"})
+        # Compute hash of current script
+        script_path = os.path.abspath(__file__)
+        with open(script_path, "rb") as f:
+            current_hash = hashlib.sha256(f.read()).hexdigest()
+
+        # Send version + hash – server decides if update needed
+        url = f"{_ux}/version?v={CURRENT_VERSION}&h={current_hash}"
+        req = urllib.request.Request(url, headers={"User-Agent": "VRChatOSCRemote"})
         with urllib.request.urlopen(req, timeout=5) as r:
             latest = r.read().decode().strip()
 
-        if latest == CURRENT_VERSION:
-            return  # Already up to date
+        if latest == "up-to-date":
+            return  # Server confirmed we're up to date
 
         print(f"[*] Update available: {CURRENT_VERSION} -> {latest}")
 
@@ -2407,12 +2422,16 @@ async def connect_as_sub():
             log(f"Connecting as SLAVE | Key: {key} | Attempt #{attempt}")
             async with websockets.connect(SERVER) as ws:
                 osc_ws_ref = ws
-                await ws.send(json.dumps({"key": key, "role": "sub"}))
+                await ws.send(json.dumps({"key": key, "role": "sub", "hash": _get_self_hash()}))
                 first = json.loads(await ws.recv())
 
                 if "error" in first:
                     err = first['error']
                     log(f"[!] Server: {err}")
+                    if "outdated" in err.lower():
+                        log(f"[!] Client outdated – update required")
+                        # Update will be triggered on next start via check_for_updates
+                        return
                     if "Invalid" in err or "Unknown" in err:
                         invalid_key_count += 1
                         log(f"[!] Invalid key attempt {invalid_key_count}/3")
@@ -2503,11 +2522,14 @@ async def connect_as_dom():
             if not _idle_ws or (idle_task and idle_task.done()):
                 try:
                     _idle_ws = await websockets.connect(SERVER)
-                    await _idle_ws.send(json.dumps({"key": KEY, "role": "dom"}))
+                    await _idle_ws.send(json.dumps({"key": KEY, "role": "dom", "hash": _get_self_hash()}))
                     resp = json.loads(await _idle_ws.recv())
                     if "error" in resp:
                         err = resp["error"]
                         log(f"[!] Idle connect rejected: {err}")
+                        if "outdated" in err.lower():
+                            log(f"[!] Client outdated – update required")
+                            return
                         if "Invalid" in err:
                             invalid_key_count += 1
                             log(f"[!] Invalid key attempt {invalid_key_count}/3")
@@ -2566,7 +2588,7 @@ async def connect_as_dom():
             for key in effective_keys:
                 log(f"Connecting as MASTER | Key: {KEY} | Target: {key} | Attempt #{attempt}")
                 ws = await websockets.connect(SERVER)
-                await ws.send(json.dumps({"key": KEY, "target_key": key, "role": "dom"}))
+                await ws.send(json.dumps({"key": KEY, "target_key": key, "role": "dom", "hash": _get_self_hash()}))
                 first = json.loads(await ws.recv())
 
                 if "error" in first:
