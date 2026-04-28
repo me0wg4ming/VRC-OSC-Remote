@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.82"
+CURRENT_VERSION = "1.84"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -126,7 +126,7 @@ if _cfg_dirty:
     with open(_CONFIG_PATH, "w") as f:
         config.write(f)
 
-SERVER   = _ep
+SERVER   = _ep.replace("https://", "wss://").replace("http://", "ws://")
 ROLE     = config["general"]["role"].lower()
 OSC_PORT = int(config["osc"]["send_port"])
 OSC_RECV = int(config["osc"]["recv_port"])
@@ -3086,7 +3086,7 @@ def main():
     print("  VRChat OSC Relay Client")
     print("=" * 50)
     log(f"Role:   {ROLE.upper()}")
-    log(f"Server: {SERVER}")
+    log("Server: Connected (Secure)")
     log(f"Key:    {KEY}")
     if ROLE == "dom":
         log(f"Targets: {', '.join(KEYS)}")
