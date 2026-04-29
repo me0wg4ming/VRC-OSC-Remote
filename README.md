@@ -147,6 +147,8 @@ Make sure OSC is enabled in VRChat:
 2. Action Menu → OSC → Enable OSC
 3. The client will auto-detect your OSC configuration
 
+> **Note:** The client is launched via `launcher.py` (handled automatically by the installer shortcut). Do not run `client.py` directly.
+
 ---
 
 ## Privacy & Security
@@ -158,6 +160,54 @@ Make sure OSC is enabled in VRChat:
 - 📡 All traffic is TLS encrypted
 - 🔐 Server address is obfuscated in the client binary
 - ☁️ Whitelist and Sub lists are stored server-side only – not on your PC
+
+---
+
+## Changelog
+
+### v1.94 (2026-04-29)
+- Added "VRChat detected – OSC active" log message
+- Improved OSC error message: now shows actionable hint to enable OSC
+- Disabled key now shows clear reason on reconnect attempts
+- Fixed disabled key kick message for Dom and idle connections
+
+### v1.90 (2026-04-29)
+- Fixed kicked event not being shown on reconnect after key disable
+- Admin panel: disabled keys are now kicked immediately from active sessions
+- Admin panel: "Disable" button now reflects state correctly after action
+
+### v1.86 (2026-04-29)
+- All user data (config, logs, presets, window positions) moved to `%APPDATA%\VRChatOSCRemote\`
+- Auto-update now writes to AppData instead of install directory
+- Fixes startup issues for Windows 11 Home users (no admin rights needed)
+- Added `launcher.py` for smart AppData vs install-dir routing
+- Server address no longer shown in logs ("Connected (Secure)")
+
+### v1.82 (2026-04-17)
+- Server-side hash verification – client rejected if hash mismatches
+- Update server now requires `VRChatOSCRemote` User-Agent (blocks browser access)
+- Fixed sub reappearing in Dom list after reconnect
+- Fixed avatar preset isolation per sub
+- Linux/Proton OSCQuery support added
+- Invalid key detection: after 3 failed attempts, Settings window opens automatically
+
+### v1.70 (2026-04-16)
+- Multi-sub support for Dom: control multiple Subs simultaneously
+- Domlist and Whitelist now server-side only
+- Sub count shown in Dom UI
+- Window title shows current version
+
+### v1.0 – v1.60 (2026-04-16)
+- Initial release with Sub/Dom roles
+- WebSocket relay via Cloudflare Tunnel
+- OSC avatar parameter control (Bool, Int)
+- Movement controls (forward, back, left, right, rotate, jump, spin, run)
+- Chatbox control
+- Preset system per avatar
+- Auto-update system
+- Key-based authentication via Discord bot
+- Parameter search and category filtering
+- Window position memory
 
 ---
 
