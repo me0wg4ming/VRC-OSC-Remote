@@ -25,7 +25,7 @@ A remote control tool for VRChat avatars using OSC protocol. Allows a **Dom** to
 
 Head to the [Releases](../../releases) page and download the latest `VRChatOSCRemote-Setup.exe`.
 
-> ✅ **0/72 on VirusTotal** – The installer is signed and clean.
+> ✅ **0/71 on VirusTotal** – The installer is signed and clean.
 
 https://www.virustotal.com/gui/file/2a96fb1d71e9757d3794c8333c6943d410ba06eb3b698bbf7c157cf5d30a8dad
 
