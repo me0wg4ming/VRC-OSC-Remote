@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.84"
+CURRENT_VERSION = "1.85"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -29,7 +29,35 @@ _ep = _x
 # ── Config ────────────────────────────────────────────────────────────────────
 import sys as _sys_early
 _BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-_CONFIG_PATH = os.path.join(_BASE_DIR, "config.ini")
+
+# ── AppData paths (writable, works on Win Home without admin rights) ──────────
+_APP_NAME   = "VRChatOSCRemote"
+if os.name == "nt":
+    _DATA_DIR = os.path.join(os.environ.get("APPDATA", _BASE_DIR), _APP_NAME)
+else:
+    _DATA_DIR = _BASE_DIR
+os.makedirs(_DATA_DIR, exist_ok=True)
+
+_CONFIG_PATH = os.path.join(_DATA_DIR, "config.ini")
+
+# ── Migration: move old files from install dir to AppData if present ──────────
+def _migrate_file(filename):
+    old_path = os.path.join(_BASE_DIR, filename)
+    new_path = os.path.join(_DATA_DIR, filename)
+    if os.path.exists(old_path) and not os.path.exists(new_path):
+        try:
+            import shutil
+            shutil.copy2(old_path, new_path)
+            os.rename(old_path, old_path + ".bak")
+        except Exception as e:
+            print(f"[!] Migration failed for {filename}: {e}")
+
+_migrate_file("config.ini")
+_migrate_file("window_dom.ini")
+_migrate_file("window_sub.ini")
+_migrate_file("window_log_dom.ini")
+_migrate_file("window_log_sub.ini")
+_migrate_file("presets.json")
 
 def _first_run_setup():
     """Shows a setup dialog on first run to configure role and key."""
@@ -156,8 +184,7 @@ _log_callbacks = []
 def _init_log_file():
     global _log_file
     try:
-        base = os.path.dirname(os.path.abspath(_sys.executable if getattr(_sys, 'frozen', False) else __file__))
-        log_dir = os.path.join(base, "logs")
+        log_dir = os.path.join(_DATA_DIR, "logs")
         os.makedirs(log_dir, exist_ok=True)
         fname = datetime.now().strftime("%Y-%m-%d") + ".txt"
         _log_file = open(os.path.join(log_dir, fname), "a", encoding="utf-8")
@@ -210,8 +237,8 @@ def check_for_updates():
 
         print(f"[*] Update available: {CURRENT_VERSION} -> {latest}")
 
-        # Download new client.py
-        script_path = os.path.abspath(__file__)
+        # Download new client.py into AppData (writable on all Windows editions)
+        script_path = os.path.join(_DATA_DIR, "client.py")
         backup_path = script_path + ".bak"
         tmp_path    = script_path + ".tmp"
 
@@ -224,15 +251,16 @@ def check_for_updates():
         with open(tmp_path, "wb") as f:
             f.write(data)
 
-        # Backup current, replace with new
+        # Backup current (if exists in AppData), replace with new
         if os.path.exists(backup_path):
             os.remove(backup_path)
-        os.rename(script_path, backup_path)
+        if os.path.exists(script_path):
+            os.rename(script_path, backup_path)
         os.rename(tmp_path, script_path)
 
         print(f"[*] Update downloaded – restarting...")
 
-        # Restart with updated script
+        # Restart with updated script from AppData
         python = os.path.join(os.path.dirname(os.path.abspath(_sys.executable)), "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
@@ -879,7 +907,11 @@ def open_settings_window(parent_root, click_x=None, click_y=None):
         python = os.path.join(os.path.dirname(os.path.abspath(_sys.executable)), "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
-        subprocess.Popen([python, os.path.abspath(__file__)])
+        # Prefer AppData client.py if it exists (updated version), else fall back to install dir
+        _restart_script = os.path.join(_DATA_DIR, "client.py")
+        if not os.path.exists(_restart_script):
+            _restart_script = os.path.abspath(__file__)
+        subprocess.Popen([python, _restart_script])
         os._exit(0)
 
     def on_role_change(*a):
@@ -989,7 +1021,7 @@ class DomGUI:
         self._resize_job = None
 
         # Fensterposition/-größe laden
-        self._win_cfg_path = os.path.join(_BASE_DIR, "window_dom.ini")
+        self._win_cfg_path = os.path.join(_DATA_DIR, "window_dom.ini")
         self._load_window_geometry()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_dom)
 
@@ -1218,7 +1250,7 @@ class DomGUI:
                   relief="flat", padx=8, pady=2,
                   cursor="hand2").pack(side="left", padx=2, pady=5)
 
-        self._presets_path = os.path.join(_BASE_DIR, "presets.json")
+        self._presets_path = os.path.join(_DATA_DIR, "presets.json")
         self._presets = self._load_presets_file()
         self._current_avatar_id = None
 
@@ -1787,7 +1819,7 @@ class DomGUI:
         win.configure(bg="#1e1e2e")
         win.withdraw()
         _set_window_icon(win)
-        _log_win_cfg = os.path.join(_BASE_DIR, "window_log_dom.ini")
+        _log_win_cfg = os.path.join(_DATA_DIR, "window_log_dom.ini")
         try:
             if os.path.exists(_log_win_cfg):
                 win.geometry(open(_log_win_cfg).read().strip())
@@ -2835,7 +2867,7 @@ class SubGUI:
         self.root.resizable(False, False)
 
         # Fensterposition laden
-        self._win_cfg_path = os.path.join(_BASE_DIR, "window_sub.ini")
+        self._win_cfg_path = os.path.join(_DATA_DIR, "window_sub.ini")
         try:
             if os.path.exists(self._win_cfg_path):
                 with open(self._win_cfg_path, "r") as f:
@@ -3007,7 +3039,7 @@ class SubGUI:
         win.configure(bg="#1e1e2e")
         win.withdraw()
         _set_window_icon(win)
-        _log_win_cfg = os.path.join(_BASE_DIR, "window_log_sub.ini")
+        _log_win_cfg = os.path.join(_DATA_DIR, "window_log_sub.ini")
         try:
             if os.path.exists(_log_win_cfg):
                 win.geometry(open(_log_win_cfg).read().strip())
