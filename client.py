@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.89"
+CURRENT_VERSION = "1.94"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -442,8 +442,7 @@ def get_current_avatar():
         log(f"[*] OSCQuery: avatar={avatar_id} | {len(filtered)} params (of {len(results)} total)")
         return avatar_id, filtered
 
-    except Exception as e:
-        log(f"[!] OSCQuery error: {e}")
+    except Exception:
         return None, []
 
 def read_avatar_params(avatar_id):
@@ -672,6 +671,7 @@ def osc_avatar_change_handler(address, *args):
                 "display_name": display_name
             })
             asyncio.run_coroutine_threadsafe(osc_ws_ref.send(payload), osc_loop)
+            log("[*] VRChat detected – OSC active")
             log(f"[OSC] Avatar change sent: {final_id} | {len(params)} params")
 
     threading.Thread(target=send_after_delay, daemon=True).start()
@@ -2479,6 +2479,16 @@ async def connect_as_sub():
                 await ws.send(json.dumps({"key": key, "role": "sub", "hash": _get_self_hash()}))
                 first = json.loads(await ws.recv())
 
+                if first.get("event") == "kicked":
+                    reason = first.get("reason", "Kicked by server")
+                    log(f"[!] Kicked by server: {reason}")
+                    if sub_gui_instance:
+                        sub_gui_instance.root.after(0, lambda r=reason: sub_gui_instance.status_label.config(
+                            text=f"● Kicked: {r}", fg="#f38ba8"
+                        ))
+                    await asyncio.sleep(RECONNECT_DELAY)
+                    continue
+
                 if "error" in first:
                     err = first['error']
                     log(f"[!] Server: {err}")
@@ -2529,11 +2539,12 @@ async def connect_as_sub():
                         "event": "avatar_change", "avatar_id": avatar_id,
                         "params": params, "display_name": display_name,
                     }))
+                    log("[*] VRChat detected – OSC active")
                     log(f"[*] Current avatar sent: {avatar_id}")
                 else:
                     # OSCQuery failed or VRChat not running - send only sub_info, no avatar
                     _avatar_just_sent = 0.0
-                    log(f"[*] VRChat not reachable via OSCQuery - skipping avatar send")
+                    log("[*] VRChat not detected or OSC disabled – enable OSC via the VRChat Action Menu")
                     await ws.send(json.dumps({"event": "sub_info", "display_name": display_name}))
 
                 disconnected = asyncio.Event()
@@ -2578,7 +2589,16 @@ async def connect_as_dom():
                     _idle_ws = await websockets.connect(SERVER)
                     await _idle_ws.send(json.dumps({"key": KEY, "role": "dom", "hash": _get_self_hash()}))
                     resp = json.loads(await _idle_ws.recv())
-                    if "error" in resp:
+                    if resp.get("event") == "kicked":
+                        reason = resp.get("reason", "Kicked by server")
+                        log(f"[!] Idle connect rejected: {reason}")
+                        if gui_instance:
+                            gui_instance.root.after(0, lambda r=reason: gui_instance.status_label.config(
+                                text=f"● Kicked: {r}", fg="#f38ba8"
+                            ))
+                        _idle_ws = None
+                        effective_keys = []
+                    elif "error" in resp:
                         err = resp["error"]
                         log(f"[!] Idle connect rejected: {err}")
                         if "outdated" in err.lower():
