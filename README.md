@@ -89,7 +89,7 @@ Dom PC ──► wss://osc.me0wg4ming.de ◄── Sub PC
 
 ## Configuration
 
-The `config.ini` file is created automatically on first launch. It only stores the minimum required settings:
+The `config.ini` file is created automatically on first launch in `%APPDATA%\VRChatOSCRemote\`. It only stores the minimum required settings:
 
 ```ini
 [general]
@@ -136,7 +136,7 @@ The Dom can save parameter combinations as presets per avatar:
 3. Click **💾 Save** and give the preset a name
 4. Later, select the preset from the dropdown and click **▶ Load**
 
-Presets are stored locally in `presets.json` and are tied to the avatar ID.
+Presets are stored locally in `%APPDATA%\VRChatOSCRemote\presets.json` and are tied to the avatar ID.
 
 ---
 
@@ -172,7 +172,7 @@ Make sure OSC is enabled in VRChat:
 - 🤝 Doms must be explicitly approved by the Sub before connecting
 - 🚫 Keys can be revoked at any time by the server admin
 - 📡 All traffic is TLS encrypted
-- 🔐 Server address is obfuscated in the client binary
+- 🔐 Server address is obfuscated in the client binary and never shown in logs
 - ☁️ Whitelist and Sub lists are stored server-side only – not on your PC
 
 ---
