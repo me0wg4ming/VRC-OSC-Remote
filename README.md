@@ -122,6 +122,7 @@ vrchat_osc_path =
 | `/remove @user` | Sub | Remove a Dom from your whitelist |
 | `/whitelist` | Sub | Show your current whitelist |
 | `/mykey` | Anyone | Show your current key |
+| `/resetkey` | Anyone | Generate a new key (invalidates old one) |
 | `/redeem <key>` | Anyone | Activate your key in the ticket channel |
 | `/help` | Anyone | Show all commands |
 
@@ -164,6 +165,10 @@ Make sure OSC is enabled in VRChat:
 ---
 
 ## Changelog
+
+### v1.95 (2026-04-29)
+- Fixed OSC port conflict on restart (port now reuses address immediately)
+- Added retry logic for OSC listener startup
 
 ### v1.94 (2026-04-29)
 - Added "VRChat detected – OSC active" log message
