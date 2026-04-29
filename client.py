@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.86"
+CURRENT_VERSION = "1.89"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -28,7 +28,17 @@ _ep = _x
 
 # ── Config ────────────────────────────────────────────────────────────────────
 import sys as _sys_early
-_BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+# Install dir – use the start.bat/launcher location as reference
+# When client.py runs from AppData, __file__ points to AppData.
+# The actual install dir is stored via sys.argv[0] or we check known locations.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# If running from AppData, find install dir via pythonw.exe location
+_PYTHON_DIR = os.path.dirname(os.path.abspath(_sys_early.executable))
+_INSTALL_DIR = os.path.dirname(_PYTHON_DIR)  # one level up from python# Use install dir if banner exists there, else script dir
+if os.path.exists(os.path.join(_INSTALL_DIR, "banner.png")):
+    _BASE_DIR = _INSTALL_DIR
+else:
+    _BASE_DIR = _SCRIPT_DIR
 
 # ── AppData paths (writable, works on Win Home without admin rights) ──────────
 _APP_NAME   = "VRChatOSCRemote"
@@ -266,6 +276,8 @@ def check_for_updates():
         if not os.path.exists(python):
             python = _sys.executable
         subprocess.Popen([python, launcher])
+        import time as _time
+        _time.sleep(1.5)
         os._exit(0)
 
     except Exception as e:
@@ -695,7 +707,7 @@ def open_settings_window(parent_root, click_x=None, click_y=None):
     win.minsize(420, 260)
     win.grab_set()
     try:
-        ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+        ico_path = os.path.join(_BASE_DIR, "icon.ico")
         if not os.path.exists(ico_path):
             ico_path = os.path.join(os.path.dirname(_sys.executable), "icon.ico")
         if os.path.exists(ico_path):
@@ -913,7 +925,15 @@ def open_settings_window(parent_root, click_x=None, click_y=None):
         python = os.path.join(_BASE_DIR, "python", "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
+        # Hide the settings window and parent immediately before restart
+        try:
+            win.withdraw()
+            parent_root.withdraw()
+        except Exception:
+            pass
         subprocess.Popen([python, launcher])
+        import time as _time
+        _time.sleep(1.5)
         os._exit(0)
 
     def on_role_change(*a):
@@ -984,7 +1004,7 @@ def open_settings_window(parent_root, click_x=None, click_y=None):
 def _set_window_icon(win):
     """Sets the app icon on a Toplevel window."""
     try:
-        ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+        ico_path = os.path.join(_BASE_DIR, "icon.ico")
         if not os.path.exists(ico_path):
             ico_path = os.path.join(os.path.dirname(_sys.executable), "icon.ico")
         if os.path.exists(ico_path):
@@ -1029,7 +1049,7 @@ class DomGUI:
 
         # Fenster-Icon setzen
         try:
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+            icon_path = os.path.join(_BASE_DIR, "icon.ico")
             if not os.path.exists(icon_path):
                 icon_path = os.path.join(os.path.dirname(sys.executable), "icon.ico")
             if os.path.exists(icon_path):
@@ -1044,7 +1064,7 @@ class DomGUI:
         # ── Banner ────────────────────────────────────────────────────────────
         try:
             from PIL import Image, ImageTk
-            banner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "banner.png")
+            banner_path = os.path.join(_BASE_DIR, "banner.png")
             if not os.path.exists(banner_path):
                 banner_path = os.path.join(os.path.dirname(sys.executable), "banner.png")
             if os.path.exists(banner_path):
@@ -2883,7 +2903,7 @@ class SubGUI:
 
         # Icon
         try:
-            ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+            ico_path = os.path.join(_BASE_DIR, "icon.ico")
             if not os.path.exists(ico_path):
                 ico_path = os.path.join(os.path.dirname(sys.executable), "icon.ico")
             if os.path.exists(ico_path):
@@ -2894,7 +2914,7 @@ class SubGUI:
         # Banner
         try:
             from PIL import Image, ImageTk
-            banner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "banner.png")
+            banner_path = os.path.join(_BASE_DIR, "banner.png")
             if not os.path.exists(banner_path):
                 banner_path = os.path.join(os.path.dirname(sys.executable), "banner.png")
             if os.path.exists(banner_path):
