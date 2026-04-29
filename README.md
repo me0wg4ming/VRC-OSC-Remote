@@ -27,7 +27,7 @@ Head to the [Releases](../../releases) page and download the latest `VRChatOSCRe
 
 > ✅ **0/72 on VirusTotal** – The installer is signed and clean.
 
-https://www.virustotal.com/gui/file/134a52fed0389992da44edaf3d70cf8185b42a9a540a0aafd29369252b7fd5a8
+https://www.virustotal.com/gui/file/aba4343c5d0c456fa2058874280ffeb9e6f6711e06cdbf8fffc20cd5e57d2dac
 
 ---
 
@@ -89,7 +89,7 @@ Dom PC ──► wss://osc.me0wg4ming.de ◄── Sub PC
 
 ## Configuration
 
-The `config.ini` file is created automatically on first launch in `%APPDATA%\VRChatOSCRemote\`. It only stores the minimum required settings:
+The `config.ini` file is created automatically on first launch. It only stores the minimum required settings:
 
 ```ini
 [general]
@@ -136,23 +136,7 @@ The Dom can save parameter combinations as presets per avatar:
 3. Click **💾 Save** and give the preset a name
 4. Later, select the preset from the dropdown and click **▶ Load**
 
-Presets are stored locally in `%APPDATA%\VRChatOSCRemote\presets.json` and are tied to the avatar ID.
-
----
-
-## Building from source
-
-### Requirements
-- Python 3.11
-- `pip install python-osc websockets Pillow`
-
-### Run directly
-```bash
-python client.py
-```
-
-### Build installer (Windows)
-See `build_instructions.md` for full steps.
+Presets are stored locally in `presets.json` and are tied to the avatar ID.
 
 ---
 
@@ -172,7 +156,7 @@ Make sure OSC is enabled in VRChat:
 - 🤝 Doms must be explicitly approved by the Sub before connecting
 - 🚫 Keys can be revoked at any time by the server admin
 - 📡 All traffic is TLS encrypted
-- 🔐 Server address is obfuscated in the client binary and never shown in logs
+- 🔐 Server address is obfuscated in the client binary
 - ☁️ Whitelist and Sub lists are stored server-side only – not on your PC
 
 ---
