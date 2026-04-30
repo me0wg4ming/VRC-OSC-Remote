@@ -89,7 +89,7 @@ Dom PC ──► wss://osc.me0wg4ming.de ◄── Sub PC
 
 ## Configuration
 
-The `config.ini` file is created automatically on first launch. It only stores the minimum required settings:
+The `config.ini` file is created automatically on first launch and stored in `%APPDATA%\VRChatOSCRemote\`. It only stores the minimum required settings:
 
 ```ini
 [general]
@@ -137,7 +137,7 @@ The Dom can save parameter combinations as presets per avatar:
 3. Click **💾 Save** and give the preset a name
 4. Later, select the preset from the dropdown and click **▶ Load**
 
-Presets are stored locally in `presets.json` and are tied to the avatar ID.
+Presets are stored locally in `%APPDATA%\VRChatOSCRemote\presets.json` and are tied to the avatar ID. They persist across updates.
 
 ---
 
@@ -165,6 +165,13 @@ Make sure OSC is enabled in VRChat:
 ---
 
 ## Changelog
+
+### v1.97 (2026-04-30)
+- Fixed "No subs in domlist yet" message no longer appears when key is invalid
+- Invalid key status now shows correctly in Dom UI (● Invalid key x/3)
+
+### v1.96 (2026-04-30)
+- Fixed invalid key status label for both Sub and Dom UI
 
 ### v1.95 (2026-04-29)
 - Fixed OSC port conflict on restart (port now reuses address immediately)
