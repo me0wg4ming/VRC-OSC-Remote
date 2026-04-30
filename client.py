@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.94"
+CURRENT_VERSION = "1.97"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -680,19 +680,28 @@ def start_osc_listener():
     d = dispatcher.Dispatcher()
     d.map("/avatar/parameters/*", osc_param_handler)
     d.map("/avatar/change",       osc_avatar_change_handler)
-    try:
-        server = osc_server.ThreadingOSCUDPServer(("127.0.0.1", OSC_RECV), d)
-        log(f"[OSC] Listener started on port {OSC_RECV}")
-        server.serve_forever()
-    except OSError as e:
-        log(f"[!] OSC listener error on port {OSC_RECV}: {e}")
-        log(f"[!] Port {OSC_RECV} already in use – trying port {OSC_RECV + 1}")
+
+    # Allow reuse of port immediately after restart
+    osc_server.ThreadingOSCUDPServer.allow_reuse_address = True
+
+    for attempt in range(5):
         try:
-            server = osc_server.ThreadingOSCUDPServer(("127.0.0.1", OSC_RECV + 1), d)
-            log(f"[OSC] Listener started on port {OSC_RECV + 1}")
+            server = osc_server.ThreadingOSCUDPServer(("127.0.0.1", OSC_RECV), d)
+            log(f"[OSC] Listener started on port {OSC_RECV}")
             server.serve_forever()
-        except OSError as e2:
-            log(f"[!] OSC listener could not be started: {e2}")
+            return
+        except OSError:
+            if attempt < 4:
+                import time as _t
+                _t.sleep(1)
+            else:
+                log(f"[!] Port {OSC_RECV} still in use – trying port {OSC_RECV + 1}")
+                try:
+                    server = osc_server.ThreadingOSCUDPServer(("127.0.0.1", OSC_RECV + 1), d)
+                    log(f"[OSC] Listener started on port {OSC_RECV + 1}")
+                    server.serve_forever()
+                except OSError as e2:
+                    log(f"[!] OSC listener could not be started: {e2}")
 
 # ── GUI (Dom) ──────────────────────────────────────────────────────────────
 def open_settings_window(parent_root, click_x=None, click_y=None):
@@ -2499,6 +2508,10 @@ async def connect_as_sub():
                     if "Invalid" in err or "Unknown" in err:
                         invalid_key_count += 1
                         log(f"[!] Invalid key attempt {invalid_key_count}/3")
+                        if sub_gui_instance:
+                            sub_gui_instance.root.after(0, lambda c=invalid_key_count: sub_gui_instance.status_label.config(
+                                text=f"● Invalid key ({c}/3)", fg="#f38ba8"
+                            ))
                         if invalid_key_count >= 3:
                             log(f"[!] Key rejected 3 times – opening settings")
                             if sub_gui_instance:
@@ -2607,6 +2620,10 @@ async def connect_as_dom():
                         if "Invalid" in err:
                             invalid_key_count += 1
                             log(f"[!] Invalid key attempt {invalid_key_count}/3")
+                            if gui_instance:
+                                gui_instance.root.after(0, lambda c=invalid_key_count: gui_instance.status_label.config(
+                                    text=f"● Invalid key ({c}/3)", fg="#f38ba8"
+                                ))
                             if invalid_key_count >= 3:
                                 log(f"[!] Key rejected 3 times – opening settings")
                                 if gui_instance:
@@ -2614,7 +2631,8 @@ async def connect_as_dom():
                                 return
                         _idle_ws = None
                         effective_keys = []
-                    elif resp.get("event") == "domlist_sync":
+                        await asyncio.sleep(RECONNECT_DELAY)
+                        continue
                         dl_keys = resp.get("keys", [])
                         _save_domlist_from_server(dl_keys)
                         log(f"[*] Idle connected | Domlist: {len(dl_keys)} key(s)")
@@ -2726,7 +2744,7 @@ async def connect_as_dom():
                     keepalive_monitor(ws, "dom", key, disconnected)
                 ))
 
-            if not connections:
+            if not connections and not invalid_key_count:
                 log(f"[*] No subs in domlist yet – idle connected, waiting...")
                 if gui_instance:
                     gui_instance.root.after(0, lambda: gui_instance.set_server_connected(KEY))
