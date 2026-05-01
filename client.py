@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.97"
+CURRENT_VERSION = "1.98"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -45,7 +45,7 @@ _APP_NAME   = "VRChatOSCRemote"
 if os.name == "nt":
     _DATA_DIR = os.path.join(os.environ.get("APPDATA", _BASE_DIR), _APP_NAME)
 else:
-    _DATA_DIR = _BASE_DIR
+    _DATA_DIR = os.path.join(os.path.expanduser("~"), f".{_APP_NAME}")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
 _CONFIG_PATH = os.path.join(_DATA_DIR, "config.ini")
