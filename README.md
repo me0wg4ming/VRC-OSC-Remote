@@ -27,7 +27,7 @@ Head to the [Releases](../../releases) page and download the latest `VRChatOSCRe
 
 > ✅ **0/71 on VirusTotal** – The installer is signed and clean.
 
-https://www.virustotal.com/gui/file/6008967388004d481cb9b2a11e95c173f40d3c45e28248245ba68eca64da4632
+https://www.virustotal.com/gui/file/cd5a8ae7d5937aaaf08024eac613732f4d9fc50ae94d2e4b373e7a0a9e4f4531
 
 ---
 
@@ -150,6 +150,8 @@ Make sure OSC is enabled in VRChat:
 
 > **Note:** The client is launched via `launcher.py` (handled automatically by the installer shortcut). Do not run `client.py` directly.
 
+> **Linux/Proton:** User data is stored in `~/.VRChatOSCRemote/` instead of `%APPDATA%`.
+
 ---
 
 ## Privacy & Security
@@ -165,6 +167,11 @@ Make sure OSC is enabled in VRChat:
 ---
 
 ## Changelog
+
+### v1.98 (2026-04-30)
+- Linux/Proton: user data now stored in `~/.VRChatOSCRemote/` instead of install directory
+- `launcher.py` now cleans up `client.py` from install directory after migration to AppData
+- Installer now places `client.py` directly in `%APPDATA%\VRChatOSCRemote\`
 
 ### v1.97 (2026-04-30)
 - Fixed "No subs in domlist yet" message no longer appears when key is invalid
