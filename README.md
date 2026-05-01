@@ -27,7 +27,7 @@ Head to the [Releases](../../releases) page and download the latest `VRChatOSCRe
 
 > ✅ **0/71 on VirusTotal** – The installer is signed and clean.
 
-https://www.virustotal.com/gui/file/cd5a8ae7d5937aaaf08024eac613732f4d9fc50ae94d2e4b373e7a0a9e4f4531
+https://www.virustotal.com/gui/file/5ec3e2632a8255aff4c3115d0335dd292c57ac21bd64b6c33c231863d3fcb4a6
 
 ---
 
@@ -167,6 +167,10 @@ Make sure OSC is enabled in VRChat:
 ---
 
 ## Changelog
+
+### v1.99 (2026-04-30)
+- Fixed double-start bug on Linux – `launcher.py` no longer starts `client.py` twice
+- Client now restarts itself directly instead of via `launcher.py` (prevents duplicate processes)
 
 ### v1.98 (2026-04-30)
 - Linux/Proton: user data now stored in `~/.VRChatOSCRemote/` instead of install directory
